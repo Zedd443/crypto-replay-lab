@@ -309,3 +309,49 @@ button.accent:hover:not(:disabled){background:#348cf5}
 .plan-hit-dot.hit-tp{background:#20d69f}
 .plan-hit-dot.hit-sl{background:#fa667a}
 .plan-hit-dot.hit-manual{background:#e6bf75}
+
+.snap-plan{grid-column:1/-1;display:flex;flex-direction:column;gap:7px}
+.snap-plan .plan-warning{padding:8px;line-height:1.5}
+.snap-plan>button{padding:10px;background:#174a77;color:#d4eaff;border:1px solid #397ab0;font-size:11px}
+
+.ghost-controls{position:absolute;bottom:14px;left:55px;z-index:7;
+ display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.ghost-controls>button{font-size:11px;padding:7px 9px;background:#152d48;
+ border-color:#365977;color:#bbd6f4}
+.ghost-settings{width:228px;background:#111f33f5;border:1px solid #365a7c;
+ padding:11px;box-shadow:0 12px 34px #030a13a6;border-radius:8px;
+ display:flex;flex-direction:column;gap:8px}
+.ghost-settings strong{font-size:10px;letter-spacing:.08em;color:#99c9f2}
+.ghost-settings p{font-size:10px;color:#c7a9a9;margin:0}
+.ghost-settings label{display:flex;justify-content:space-between;align-items:center;
+ gap:8px;font-size:11px;color:#bed1e4}
+.ghost-settings input:not([type="checkbox"]){width:76px;padding:5px;
+ border:1px solid #416185;background:#0c192a;color:#f3f6fb}
+.ghost-settings>button{padding:8px;font-size:11px}
+.ghost-watermark{position:absolute;top:98px;right:12px;z-index:2;
+ pointer-events:none;max-width:145px;font-size:9px;letter-spacing:.06em;
+ color:#f6ce9773;text-align:right}
+
+/* Ghost Feed is a movable sketch, not exchange OHLCV or the replay series. */
+.ghost-feed-editor{left:55px;bottom:14px;display:flex;align-items:center;gap:8px;
+ background:#10243be8;max-width:520px;padding:7px 10px;flex-wrap:wrap}
+.ghost-feed-editor strong{font-size:10px;color:#98cdff}
+.ghost-feed-editor label{display:flex;align-items:center;gap:4px;font-size:10px;color:#b5cde5}
+.ghost-feed-editor input{width:67px;padding:4px;background:#102037;color:#e5f3ff;
+ border:1px solid #40618a}
+.ghost-feed-editor span{font-size:10px;color:#f0c38b}
+.chart-shape-ghost_feed{background:transparent!important;border:1px dashed #77bfe690;
+ opacity:.95}
+.chart-shape-ghost_feed .shape-handle{pointer-events:auto}
+.ghost-feed-candles{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.ghost-feed-bar{position:absolute;width:1px;border-left:1px solid var(--drawing-color,#84bfff);
+ opacity:.78;pointer-events:none}
+.ghost-feed-body{position:absolute;left:-4px;width:8px;min-height:2px;
+ border:1px solid #b2daff;background:#479fae85}
+.ghost-feed-body[data-direction="down"]{background:#d7738585}
+
+.ghost-feed-select{position:absolute;left:4px;top:3px;z-index:5;
+ padding:3px 6px;border:1px solid #6fa6cc;border-radius:4px;
+ background:#102e4be0;font-size:9px;letter-spacing:.08em;
+ color:#cae6ff;cursor:grab;pointer-events:auto;white-space:nowrap}
+.chart-shape-ghost_feed.selected .ghost-feed-select{background:#206092;border-color:#9bcfff;color:white}

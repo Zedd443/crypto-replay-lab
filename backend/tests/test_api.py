@@ -161,7 +161,10 @@ def test_trendline_anchors_and_rewind(tmp_path):
     clock = state["clock_ms"]
     drawing = {"kind":"trendline", "timeframe":"1m", "price":100, "end_price":110,
                "anchor_start":clock-2*MINUTE_MS, "anchor_end":clock}
-    assert client.post(f"{url}/drawings", json=drawing).status_code == 400
+    # Drawing at the future planning boundary is now permitted.
+    # Values beyond the 80-slot safety horizon must still be rejected.
+    invalid = dict(drawing,anchor_end=clock+81*MINUTE_MS)
+    assert client.post(f"{url}/drawings", json=invalid).status_code == 400
     drawing["anchor_end"] -= MINUTE_MS
     assert client.post(f"{url}/drawings", json=drawing).status_code == 201
     saved = client.get(f"{url}/drawings").get_json()[0]
@@ -202,8 +205,8 @@ def test_new_shapes_save_and_hide_on_rewind(tmp_path,kind):
     clock = session["clock_ms"]
     drawing = {"kind":kind,"timeframe":"1m","price":100,
                "anchor_start":clock-3*MINUTE_MS,"anchor_end":clock-MINUTE_MS,"end_price":105}
-    future = dict(drawing,anchor_start=clock)
-    assert client.post(f"{path}/drawings",json=future).status_code==400
+    beyond_horizon = dict(drawing,anchor_start=clock+81*MINUTE_MS)
+    assert client.post(f"{path}/drawings",json=beyond_horizon).status_code==400
     response=client.post(f"{path}/drawings",json=drawing)
     assert response.status_code==201
     saved=client.get(f"{path}/drawings").get_json()[0]

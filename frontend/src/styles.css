@@ -80,3 +80,23 @@
   .chart-drawing-tools{left:155px;flex-wrap:wrap}
   .drawing-favorites{top:76px}
 }
+
+/* Interactive price/time drawings: transparent root, pointer-targeted shapes/handles. */
+.chart-shape-overlay{position:absolute;z-index:2;pointer-events:none;overflow:hidden}
+.chart-shape.editable{pointer-events:auto;cursor:grab;touch-action:none}
+.chart-shape.editable:active{cursor:grabbing}
+.chart-shape.draft{opacity:.7}
+.chart-shape .shape-handle{position:absolute;width:11px;height:11px;border:2px solid #0b1422;
+  background:#8be1ff;border-radius:3px;pointer-events:auto;cursor:nwse-resize}
+.shape-handle.nw{left:-6px;top:-6px}
+.shape-handle.se{right:-6px;bottom:-6px}
+.chart-shape-long_position,.chart-shape-short_position{background:transparent;border:1px dashed #8cb2e2}
+.chart-shape .plan-reward,.chart-shape .plan-risk{position:absolute;left:0;width:100%;pointer-events:none}
+.chart-shape .plan-reward{background:#42b89136;border:1px solid #68e0b34d}
+.chart-shape .plan-risk{background:#e1797836;border:1px solid #ff9e964d}
+.chart-shape .plan-level{position:absolute;left:0;width:100%;height:0;border-top:1px dashed currentColor;
+  font-size:10px;font-weight:600;line-height:16px;pointer-events:auto;cursor:ns-resize;white-space:nowrap;
+  text-shadow:0 1px 3px #0b1422;touch-action:none}
+.plan-level:before{content:"";position:absolute;left:50%;top:-5px;width:10px;height:10px;
+  background:currentColor;border:1px solid #0b1422;border-radius:3px}
+.plan-entry{color:#9fc4ff}.plan-stop{color:#ff9e96}.plan-target{color:#68e0b3}

@@ -5,7 +5,7 @@ import DrawingTools, {DRAWING_TOOLS} from './DrawingTools.jsx';
 import ShapeOverlay from './ShapeOverlay.jsx';
 import {calculateIndicator, INDICATORS} from './indicators.js';
 
-export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut }) {
+export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, onUpdateDrawing, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut }) {
   const rootRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -32,12 +32,13 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const [toolMenu,setToolMenu] = React.useState(false);
   const hasOpenPosition=paperPosition?.status==='open';
   const shapes=React.useMemo(()=>drawings.filter(d=>d.timeframe===timeframe &&
-    ['horizontal_ray','vertical','rectangle'].includes(d.kind)),[drawings,timeframe]);
+    ['horizontal_ray','vertical','rectangle','long_position','short_position'].includes(d.kind)),[drawings,timeframe]);
   const showToolMenu=open=>{
     setToolMenu(open);
     if(open){setDrawingListOpen(false);setIndicatorMenu(false);}
   };
   const [selectedDrawing,setSelectedDrawing] = React.useState(null);
+  const [draftShape,setDraftShape] = React.useState(null);
   busyRef.current = busy;
   const resetAnchor = () => {
     firstAnchor.current = null;
@@ -46,7 +47,8 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
 
   useEffect(() => {
     resetAnchor();
-  }, [drawingMode, timeframe, sessionId, candles]);
+    setDraftShape(null);
+  }, [drawingMode, timeframe, sessionId]);
   drawingModeRef.current = drawingMode;
   onNewLineRef.current = onNewLine;
 
@@ -79,11 +81,63 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     indicatorMarkers.current=createSeriesMarkers(series,[]);
     const pane=chart.panes()[0].getHTMLElement();
     let pointerStart=null;
+    let dragStart=null;
+    const point=(event)=>{
+      const bounds=pane.getBoundingClientRect(),scale=chart.timeScale();
+      const x=event.clientX-bounds.left-chart.priceScale('left').width();
+      const y=event.clientY-bounds.top;
+      if(x<0||x>=scale.width()||y<0||y>=bounds.height)return null;
+      const time=scale.coordinateToTime(x);
+      const price=series.coordinateToPrice(y);
+      return typeof time==='number'&&Number.isFinite(price)&&price>0?
+        {time:time*1000,price}:null;
+    };
+    const makeDraft=(first,last,kind)=>{
+      if(!first||!last||first.time===last.time)return null;
+      const [a,b]=first.time<last.time?[first,last]:[last,first];
+      if(kind==='rectangle')return {id:'draft',kind,price:a.price,end_price:b.price,
+        anchor_start:a.time,anchor_end:b.time};
+      const diff=Math.abs(last.price-first.price);
+      if(diff<=0||!Number.isFinite(diff))return null;
+      const direction=kind==='long_position'?1:-1;
+      const stop=first.price-direction*diff;
+      const target=first.price+direction*2*diff;
+      if(stop<=0||target<=0)return null;
+      return {id:'draft',kind,price:first.price,end_price:stop,
+        take_profit:target,anchor_start:a.time,anchor_end:b.time};
+    };
     const onPointerDown=(event)=>{
       pointerStart={x:event.clientX,y:event.clientY};
+      const kind=drawingModeRef.current;
+      if(busyRef.current||event.button!==0||!['rectangle','long_position','short_position'].includes(kind))return;
+      const anchor=point(event);
+      if(!anchor)return;
+      dragStart={anchor,x:event.clientX,y:event.clientY,kind};
+      pane.setPointerCapture(event.pointerId);
+      event.preventDefault();event.stopPropagation();
+    };
+    const onPointerMove=event=>{
+      if(!dragStart)return;
+      const p=point(event);
+      setDraftShape(p?makeDraft(dragStart.anchor,p,dragStart.kind):null);
+      event.preventDefault();event.stopPropagation();
+    };
+    const onPointerUp=event=>{
+      if(!dragStart)return;
+      const start=dragStart;
+      const p=point(event);
+      const drawing=p?makeDraft(start.anchor,p,start.kind):null;
+      dragStart=null;setDraftShape(null);
+      if(drawing&&Math.abs(event.clientX-start.x)>7&&Math.abs(event.clientY-start.y)>3){
+        const {id,...payload}=drawing;
+        onNewLineRef.current?.(payload);
+      }
+      try{pane.releasePointerCapture(event.pointerId);}catch{/* capture already lost */}
+      event.preventDefault();event.stopPropagation();
     };
     const onClick=(event) => {
-      if (busyRef.current || !drawingModeRef.current || !pointerStart ||
+      if (busyRef.current || !drawingModeRef.current ||
+          ['rectangle','long_position','short_position'].includes(drawingModeRef.current) || !pointerStart ||
           Math.hypot(event.clientX-pointerStart.x,event.clientY-pointerStart.y)>5) return;
       const bounds=pane.getBoundingClientRect();
       const scale=chart.timeScale();
@@ -115,10 +169,16 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       onNewLineRef.current({kind,price:start.price,end_price:end.price,
         anchor_start:start.time,anchor_end:end.time});
     };
-    pane?.addEventListener('pointerdown',onPointerDown);
+    pane?.addEventListener('pointerdown',onPointerDown,true);
+    pane?.addEventListener('pointermove',onPointerMove,true);
+    pane?.addEventListener('pointerup',onPointerUp,true);
+    pane?.addEventListener('pointercancel',onPointerUp,true);
     pane?.addEventListener('click',onClick);
     return () => {
-      pane?.removeEventListener('pointerdown',onPointerDown);
+      pane?.removeEventListener('pointerdown',onPointerDown,true);
+      pane?.removeEventListener('pointermove',onPointerMove,true);
+      pane?.removeEventListener('pointerup',onPointerUp,true);
+      pane?.removeEventListener('pointercancel',onPointerUp,true);
       pane?.removeEventListener('click',onClick);
       indicatorMarkers.current?.detach();
       indicatorMarkers.current=null;
@@ -223,7 +283,9 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     {paperPosition&&<BracketOverlay key={paperPosition.id} position={paperPosition} chart={chartRef}
       series={candleSeriesRef} candles={candles} disabled={positionLocked||paperPosition.status!=='open'}
       onAdjust={onAdjustPosition}/>}
-    {shapes.length>0&&<ShapeOverlay chart={chartRef} series={candleSeriesRef} drawings={shapes} selected={selectedDrawing}/>}
+    {(shapes.length>0||draftShape)&&<ShapeOverlay chart={chartRef} series={candleSeriesRef}
+      drawings={shapes} draft={draftShape} selected={selectedDrawing} onSelect={setSelectedDrawing}
+      onEdit={onUpdateDrawing} disabled={busy||positionLocked}/>}
     <DrawingTools open={toolMenu} onOpen={showToolMenu} mode={drawingMode}
       disabled={busy||!sessionId} onSelect={onDrawingMode} onTrade={onTradeShortcut}/>
     <div className="chart-drawing-tools" aria-label="Chart options">
@@ -241,6 +303,8 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
         <p>One lower-pane indicator at a time.</p>
       </section>}
       {awaitingEnd&&<span role="status">Pick second point</span>}
+      {['rectangle','long_position','short_position'].includes(drawingMode)&&
+        <span role="status">Drag on chart to create · drawings do not execute orders</span>}
       {drawingListOpen&&<section id="chart-drawing-list" className="chart-drawing-list" aria-label="Saved drawings">
         {drawings.length===0?<p>No drawings at this cursor</p>:<>
           <ul>{drawings.map(d=>{

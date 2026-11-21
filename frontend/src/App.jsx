@@ -167,6 +167,14 @@ export default function App() {
     setDrawings(await api('/api/sessions/'+session.id+'/drawings'));
   });
 
+  const updateDrawing=(id,changes)=>run(async()=>{
+    if(!session)return;
+    const url='/api/sessions/'+session.id+'/drawings/'+encodeURIComponent(id);
+    await api(url,{method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(changes)});
+    setDrawings(await api('/api/sessions/'+session.id+'/drawings'));
+  });
+
   const removeDrawing=(id)=>run(async()=>{
     if(!session)return;
     const path='/api/sessions/'+session.id+'/drawings';
@@ -261,7 +269,7 @@ export default function App() {
         </div>
         <div className="chart-with-aside">
           <ChartPanel candles={candles} timeframe={tf} sessionId={session?.id}
-            drawings={drawings} drawingMode={drawingMode} onNewLine={addLine} busy={busy}
+            drawings={drawings} drawingMode={drawingMode} onNewLine={addLine} onUpdateDrawing={updateDrawing} busy={busy}
             onDrawingMode={setDrawingMode} onRemoveDrawing={removeDrawing}
             fullscreen={Boolean(fullscreen)} onToggleFullscreen={toggleFullscreen}
             paperPosition={activePosition} onAdjustPosition={adjustPosition}

@@ -6,8 +6,8 @@ export const DRAWING_TOOLS=[
   {id:'horizontal_ray',label:'Horizontal ray',icon:'\u2192',key:'J',group:'Lines'},
   {id:'vertical',label:'Vertical line',icon:'\u2503',key:'V',group:'Lines'},
   {id:'rectangle',label:'Rectangle',icon:'\u25ad',key:'R',group:'Shapes'},
-  {id:'long',label:'Long position',icon:'L',key:'L',group:'Paper trading'},
-  {id:'short',label:'Short position',icon:'S',key:'S',group:'Paper trading'},
+  {id:'long',label:'Long R:R drawing',icon:'L',key:'L',group:'Paper trading'},
+  {id:'short',label:'Short R:R drawing',icon:'S',key:'S',group:'Paper trading'},
 ];
 const storageKey='crl-drawing-favorites';
 const initialFavorites=['trendline','rectangle','long','short'];
@@ -25,12 +25,8 @@ export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade
   });
   const choose=tool=>{
     if(disabled)return;
-    if(tool.group==='Paper trading'){
-      onSelect(null);
-      onTrade(tool.id);
-    }else{
-      onSelect(mode===tool.id?null:tool.id);
-    }
+    const next=tool.id==='long'?'long_position':tool.id==='short'?'short_position':tool.id;
+    onSelect(mode===next?null:next);
     onOpen(false);
   };
   const toggleFavorite=id=>{
@@ -79,7 +75,7 @@ export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade
       y:state.offset.y+clamp(event.clientY-state.y,state.minY,state.maxY),
     });
   };
-  const active=DRAWING_TOOLS.find(tool=>tool.id===mode);
+  const active=DRAWING_TOOLS.find(tool=>tool.id===(mode==='long_position'?'long':mode==='short_position'?'short':mode));
   const pinned=DRAWING_TOOLS.filter(tool=>favorites.includes(tool.id));
   return <>
     <div className="drawing-picker" ref={menu}>
@@ -91,7 +87,7 @@ export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade
         {['Lines','Shapes','Paper trading'].map(group=><section key={group} aria-label={group}>
           <h3>{group}</h3>
           {DRAWING_TOOLS.filter(tool=>tool.group===group).map(tool=><div className="drawing-tool-option" key={tool.id}>
-            <button type="button" disabled={disabled} aria-pressed={mode===tool.id} onClick={()=>choose(tool)}>
+            <button type="button" disabled={disabled} aria-pressed={mode===(tool.id==='long'?'long_position':tool.id==='short'?'short_position':tool.id)} onClick={()=>choose(tool)}>
               <span aria-hidden="true">{tool.icon}</span>{tool.label}<kbd>Alt+{tool.key}</kbd>
             </button>
             <button type="button" aria-label={'Favorite '+tool.label} aria-pressed={favorites.includes(tool.id)}
@@ -109,7 +105,7 @@ export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade
         onPointerCancel={()=>{grab.current=null;}}>&#8942;</button>
       {pinned.map(tool=><button key={tool.id} type="button" aria-label={'Shortcut '+tool.label}
         title={tool.label+' (Alt+'+tool.key+')'} disabled={disabled}
-        aria-pressed={mode===tool.id} className={'shortcut-'+tool.id} onClick={()=>choose(tool)}>{tool.icon}</button>)}
+        aria-pressed={mode===(tool.id==='long'?'long_position':tool.id==='short'?'short_position':tool.id)} className={'shortcut-'+tool.id} onClick={()=>choose(tool)}>{tool.icon}</button>)}
     </div>}
   </>;
 }

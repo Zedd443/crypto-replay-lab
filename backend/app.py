@@ -7,12 +7,13 @@ import csv
 import io
 import os
 import random
+import re
 import sqlite3
 import uuid
 import zipfile
 
 from flask import Flask, jsonify, request, g
-from .engine import MINUTE_MS, TF_MS, THREE_DAYS_MS, aggregate, synthetic_candles, validate_and_normalize
+from .engine import MINUTE_MS, TF_MS, THREE_DAYS_MS, bucket_start, aggregate, synthetic_candles, validate_and_normalize
 
 from . import binance_source, brackets, orders, parquet_source
 
@@ -86,14 +87,21 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             id TEXT PRIMARY KEY, session_id TEXT NOT NULL, kind TEXT NOT NULL,
             timeframe TEXT NOT NULL, price REAL NOT NULL, created_at_cursor INTEGER NOT NULL,
             created_at_ts INTEGER NOT NULL,
-            anchor_start INTEGER, anchor_end INTEGER, end_price REAL
+            anchor_start INTEGER, anchor_end INTEGER, end_price REAL, take_profit REAL,
+            color TEXT NOT NULL DEFAULT '#f0c266'
+        );
+        CREATE TABLE IF NOT EXISTS drawing_edits (
+          drawing_id TEXT NOT NULL, cursor INTEGER NOT NULL, price REAL NOT NULL,
+          anchor_start INTEGER NOT NULL, anchor_end INTEGER NOT NULL,
+          end_price REAL NOT NULL, take_profit REAL,
+          PRIMARY KEY(drawing_id,cursor)
         );
         """)
         conn.executescript(orders.SCHEMA + brackets.SCHEMA)
         if "base_ms" not in {column["name"] for column in conn.execute("PRAGMA table_info(datasets)")}:
             conn.execute("ALTER TABLE datasets ADD COLUMN base_ms INTEGER NOT NULL DEFAULT 60000")
         drawing_columns = {column["name"] for column in conn.execute("PRAGMA table_info(drawings)")}
-        for name, sql_type in (("anchor_start", "INTEGER"), ("anchor_end", "INTEGER"), ("end_price", "REAL")):
+        for name, sql_type in (("anchor_start", "INTEGER"), ("anchor_end", "INTEGER"), ("end_price", "REAL"), ("take_profit", "REAL"), ("color", "TEXT NOT NULL DEFAULT '#f0c266'")):
             if name not in drawing_columns:
                 conn.execute(f"ALTER TABLE drawings ADD COLUMN {name} {sql_type}")
         exists = conn.execute("SELECT id FROM datasets WHERE id='synthetic-demo'").fetchone()
@@ -269,7 +277,28 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
         except (TypeError,ValueError):return jsonify({"error":"invalid amount"}),400
         if abs(amount)>1440 or amount==0:return jsonify({"error":"amount must be between -1440 and 1440, excluding 0"}),400
         count = db().execute("SELECT COUNT(*) AS n FROM candles WHERE dataset_id=?",(row["dataset_id"],)).fetchone()["n"]
-        cursor = max(0,min(count-1,row["cursor"]+amount))
+        tf = payload.get("timeframe")
+        if tf is None:
+            cursor = max(0,min(count-1,row["cursor"]+amount))
+        else:
+            if tf not in TF_MS or TF_MS[tf]<row["base_ms"] or TF_MS[tf]%row["base_ms"]:
+                return jsonify({"error":"invalid active timeframe"}),400
+            current=db().execute("SELECT ts FROM candles WHERE dataset_id=? AND seq=?",
+                                 (row["dataset_id"],row["cursor"])).fetchone()
+            clock=current["ts"]+row["base_ms"]
+            span=TF_MS[tf]
+            if amount>0:
+                target=bucket_start(clock,tf)+amount*span
+                nextbar=db().execute(
+                    "SELECT seq FROM candles WHERE dataset_id=? AND ts+?<=? ORDER BY seq DESC LIMIT 1",
+                    (row["dataset_id"],row["base_ms"],target)).fetchone()
+                cursor=min(count-1,max(row["cursor"]+1,nextbar["seq"] if nextbar else row["cursor"]+1))
+            else:
+                target=bucket_start(clock-1,tf)+(amount+1)*span
+                prevbar=db().execute(
+                    "SELECT seq FROM candles WHERE dataset_id=? AND ts+?<=? ORDER BY seq DESC LIMIT 1",
+                    (row["dataset_id"],row["base_ms"],target)).fetchone()
+                cursor=max(0,min(row["cursor"]-1,prevbar["seq"] if prevbar else 0))
         max_seen = max(row["max_seen_cursor"],cursor)
         contaminated = int(bool(row["contaminated"]) or cursor < row["max_seen_cursor"])
         db().execute("UPDATE sessions SET cursor=?,max_seen_cursor=?,contaminated=? WHERE id=?",
@@ -300,10 +329,23 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
     def list_drawings(session_id):
         row = session_row(session_id)
         if row is None:return jsonify({"error":"session not found"}),404
-        rows = db().execute(
-            "SELECT * FROM drawings WHERE session_id=? AND created_at_cursor<=? ORDER BY created_at_cursor",
-            (session_id,row["cursor"])
-        ).fetchall()
+        rows = db().execute("""
+            SELECT d.id,d.session_id,d.kind,d.timeframe,
+                   COALESCE(e.price,d.price) AS price,
+                   d.created_at_cursor,d.created_at_ts,
+                   COALESCE(e.anchor_start,d.anchor_start) AS anchor_start,
+                   COALESCE(e.anchor_end,d.anchor_end) AS anchor_end,
+                   COALESCE(e.end_price,d.end_price) AS end_price,
+                   COALESCE(e.take_profit,d.take_profit) AS take_profit,
+                   d.color AS color
+            FROM drawings AS d LEFT JOIN drawing_edits AS e
+              ON e.drawing_id=d.id AND e.cursor=(
+                SELECT MAX(cursor) FROM drawing_edits
+                WHERE drawing_id=d.id AND cursor<=?
+              )
+            WHERE d.session_id=? AND d.created_at_cursor<=?
+            ORDER BY d.created_at_cursor
+        """,(row["cursor"],session_id,row["cursor"])).fetchall()
         return jsonify([dict(row) for row in rows])
 
     @app.delete("/api/sessions/<session_id>/drawings")
@@ -339,9 +381,12 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             kind = payload.get("kind","horizontal")
             tf = payload.get("timeframe","1h")
             price = float(payload["price"])
-            if kind not in ("horizontal", "trendline", "horizontal_ray", "vertical", "rectangle") or tf not in TF_MS or not (0 < price < 1e12):
+            if kind not in ("horizontal", "trendline", "horizontal_ray", "vertical", "rectangle", "fib", "long_position", "short_position") or tf not in TF_MS or not (0 < price < 1e12):
                 raise ValueError("invalid drawing")
-            start = end = end_price = None
+            color = payload.get("color","#f0c266")
+            if not isinstance(color,str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}",color):
+                raise ValueError("invalid color")
+            start = end = end_price = take_profit = None
             if kind != "horizontal":
                 if TF_MS[tf] < row["base_ms"]:
                     raise ValueError("drawing timeframe is below the dataset interval")
@@ -349,23 +394,76 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                 start = int(payload["anchor_start"])
                 if not 0 <= start < clock:
                     raise ValueError("invalid drawing start")
-                if kind in ("trendline","rectangle"):
+                if kind in ("trendline","rectangle","fib","long_position","short_position"):
                     end = int(payload["anchor_end"])
                     end_price = float(payload["end_price"])
                     if not (start < end < clock and 0 < end_price < 1e12):
                         raise ValueError("invalid drawing end")
+                if kind in ("long_position","short_position"):
+                    take_profit = float(payload["take_profit"])
+                    valid_levels = (0 < end_price < price < take_profit) if kind == "long_position" else (0 < take_profit < price < end_price)
+                    if not valid_levels or not take_profit < 1e12:
+                        raise ValueError("invalid position levels")
         except (ValueError,TypeError,KeyError):
             return jsonify({"error":"invalid drawing"}),400
         candle = db().execute("SELECT ts FROM candles WHERE dataset_id=? AND seq=?",
                               (row["dataset_id"],row["cursor"])).fetchone()
         drawing_id = str(uuid.uuid4())
         db().execute("""INSERT INTO drawings
-                     (id,session_id,kind,timeframe,price,created_at_cursor,created_at_ts,anchor_start,anchor_end,end_price)
-                     VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                     (drawing_id,session_id,kind,tf,price,row["cursor"],candle["ts"],start,end,end_price))
+                     (id,session_id,kind,timeframe,price,created_at_cursor,created_at_ts,anchor_start,anchor_end,end_price,take_profit,color)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     (drawing_id,session_id,kind,tf,price,row["cursor"],candle["ts"],start,end,end_price,take_profit,color))
         db().commit()
         return jsonify({"id":drawing_id,"kind":kind,"timeframe":tf,"price":price,
                         "created_at_cursor":row["cursor"]}),201
+
+    @app.patch("/api/sessions/<session_id>/drawings/<drawing_id>")
+    def edit_drawing(session_id, drawing_id):
+        state = session_row(session_id)
+        if state is None:
+            return jsonify({"error":"session not found"}),404
+        existing = db().execute(
+            "SELECT * FROM drawings WHERE session_id=? AND id=? AND created_at_cursor<=?",
+            (session_id,drawing_id,state["cursor"])
+        ).fetchone()
+        if existing is None:
+            return jsonify({"error":"drawing not found at replay cursor"}),404
+        if state["cursor"] != state["max_seen_cursor"]:
+            return jsonify({"error":"cannot edit a drawing while replay is rewound"}),409
+        payload = request.get_json(silent=True) or {}
+        try:
+            if "color" in payload:
+                color = payload["color"]
+                if not isinstance(color,str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}",color):
+                    raise ValueError("invalid color")
+                with db():
+                    db().execute("UPDATE drawings SET color=? WHERE id=?",(color,drawing_id))
+            if not any(k in payload for k in ("price","end_price","anchor_start","anchor_end","take_profit")):
+                return jsonify({"id":drawing_id,"updated_at_cursor":state["cursor"]})
+            if existing["kind"] not in ("rectangle","fib","long_position","short_position"):
+                raise ValueError("geometry editing not supported for this drawing")
+            price, stop = float(payload["price"]),float(payload["end_price"])
+            start, end = int(payload["anchor_start"]),int(payload["anchor_end"])
+            clock = snapshot(state)["clock_ms"]
+            if not (0 < price < 1e12 and 0 < stop < 1e12 and 0 <= start < end < clock):
+                raise ValueError("invalid drawing coordinates")
+            take_profit = None
+            if existing["kind"] in ("long_position","short_position"):
+                take_profit = float(payload["take_profit"])
+                valid = (0 < stop < price < take_profit) if existing["kind"] == "long_position" else (0 < take_profit < price < stop)
+                if not valid or not take_profit < 1e12:
+                    raise ValueError("invalid long/short price levels")
+            with db():
+                db().execute("""INSERT INTO drawing_edits
+                    (drawing_id,cursor,price,anchor_start,anchor_end,end_price,take_profit)
+                    VALUES (?,?,?,?,?,?,?) ON CONFLICT(drawing_id,cursor) DO UPDATE SET
+                    price=excluded.price,anchor_start=excluded.anchor_start,
+                    anchor_end=excluded.anchor_end,end_price=excluded.end_price,
+                    take_profit=excluded.take_profit""",
+                    (drawing_id,state["cursor"],price,start,end,stop,take_profit))
+        except (TypeError,ValueError,KeyError):
+            return jsonify({"error":"invalid drawing edit"}),400
+        return jsonify({"id":drawing_id,"updated_at_cursor":state["cursor"]})
 
     orders.register(app, db, session_row)
     return app

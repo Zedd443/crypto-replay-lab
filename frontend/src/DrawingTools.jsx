@@ -7,11 +7,12 @@ export const DRAWING_TOOLS=[
   {id:'vertical',label:'Vertical line',icon:'\u2503',key:'V',group:'Lines'},
   {id:'rectangle',label:'Rectangle',icon:'\u25ad',key:'R',group:'Shapes'},
   {id:'fib',label:'Fibonacci retracement',icon:'≡',key:'F',group:'Shapes'},
+  {id:'ghost_feed',label:'Ghost Feed drawing',icon:'♧',key:'G',group:'Forecast'},
   {id:'long',label:'Long R:R drawing',icon:'L',key:'L',group:'Paper trading'},
   {id:'short',label:'Short R:R drawing',icon:'S',key:'S',group:'Paper trading'},
 ];
 const storageKey='crl-drawing-favorites';
-const initialFavorites=['trendline','rectangle','fib','long','short'];
+const initialFavorites=['trendline','rectangle','fib','ghost_feed','long','short'];
 
 export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade}){
   const menu=useRef(null);
@@ -85,7 +86,7 @@ export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade
         {active?active.label:'Drawing tools'} <span aria-hidden="true">&#9662;</span>
       </button>
       {open&&<div id="drawing-tool-menu" className="drawing-tool-menu" aria-label="Drawing tool choices">
-        {['Lines','Shapes','Paper trading'].map(group=><section key={group} aria-label={group}>
+        {['Lines','Shapes','Forecast','Paper trading'].map(group=><section key={group} aria-label={group}>
           <h3>{group}</h3>
           {DRAWING_TOOLS.filter(tool=>tool.group===group).map(tool=><div className="drawing-tool-option" key={tool.id}>
             <button type="button" disabled={disabled} aria-pressed={mode===(tool.id==='long'?'long_position':tool.id==='short'?'short_position':tool.id)} onClick={()=>choose(tool)}>

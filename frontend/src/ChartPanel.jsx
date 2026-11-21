@@ -5,7 +5,7 @@ import DrawingTools, {DRAWING_TOOLS} from './DrawingTools.jsx';
 import ShapeOverlay from './ShapeOverlay.jsx';
 import {calculateIndicator, INDICATORS, INDICATOR_SETTINGS, DEFAULT_INDICATOR_OPTIONS} from './indicators.js';
 import {FIB_LEVELS} from './research.js';
-import {futureSlots,ghostScenario,FUTURE_SPACE_BARS} from './ghostScenario.js';
+import {futureSlots} from './ghostScenario.js';
 
 export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, onUpdateDrawing, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut,
   selectedDrawing, onSelectDrawing, orders=[], onSignalSelection }) {
@@ -13,15 +13,8 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
-  const ghostSeriesRef=useRef(null);
-  const [ghostOpen,setGhostOpen]=React.useState(false);
-  const [ghostVisible,setGhostVisible]=React.useState(false);
-  const [ghostCount,setGhostCount]=React.useState(8);
-  const [ghostMove,setGhostMove]=React.useState(2);
-  const [ghostWick,setGhostWick]=React.useState(.25);
-  const ghostBars=React.useMemo(()=>ghostScenario(candles,timeframe,{
-    count:ghostCount,movePct:ghostMove,wickPct:ghostWick
-  }),[candles,timeframe,ghostCount,ghostMove,ghostWick]);
+  const [ghostRange,setGhostRange]=React.useState(.35);
+  const [ghostVariance,setGhostVariance]=React.useState(.2);
   const drawingModeRef = useRef(drawingMode);
   const onNewLineRef = useRef(onNewLine);
   const chartLinesRef = useRef([]);
@@ -67,7 +60,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const [toolMenu,setToolMenu] = React.useState(false);
   const hasOpenPosition=paperPosition?.status==='open';
   const shapes=React.useMemo(()=>drawings.filter(d=>d.timeframe===timeframe &&
-    ['horizontal_ray','vertical','trendline','rectangle','fib','long_position','short_position'].includes(d.kind)),[drawings,timeframe]);
+    ['horizontal_ray','vertical','trendline','rectangle','fib','ghost_feed','long_position','short_position'].includes(d.kind)),[drawings,timeframe]);
   const showToolMenu=open=>{
     setToolMenu(open);
     if(open){setDrawingListOpen(false);setIndicatorMenu(false);}
@@ -109,7 +102,8 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   }, [drawingMode, timeframe, sessionId]);
   drawingModeRef.current = drawingMode;
   onNewLineRef.current = drawing=>{
-    onNewLine?.({...drawing,color:drawingColor});
+    onNewLine?.({...drawing,color:drawingColor,
+      ...(drawing.kind==='ghost_feed'?{ghost_range:ghostRange,ghost_variance:ghostVariance}:{})});
     onDrawingMode?.(null);
   };
 
@@ -136,15 +130,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       priceLineVisible: false,
     });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
-    // Scenarios are a separate visual series, never appended to actual candles.
-    const ghost=chart.addSeries(CandlestickSeries,{
-      upColor:'rgba(69,208,177,.22)',downColor:'rgba(244,121,142,.22)',
-      borderUpColor:'rgba(69,208,177,.75)',borderDownColor:'rgba(244,121,142,.75)',
-      wickUpColor:'rgba(69,208,177,.62)',wickDownColor:'rgba(244,121,142,.62)',
-      lastValueVisible:false,priceLineVisible:false,title:'',
-      crosshairMarkerVisible:false
-    });
-    ghostSeriesRef.current=ghost;
+    // Ghost Feed is rendered as an editable drawing, separate from market OHLCV.
     chartRef.current=chart;
     candleSeriesRef.current=series;
     volumeSeriesRef.current=volume;
@@ -165,7 +151,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const makeDraft=(first,last,kind)=>{
       if(!first||!last||first.time===last.time)return null;
       const [a,b]=first.time<last.time?[first,last]:[last,first];
-      if(['rectangle','fib','trendline'].includes(kind))return {id:'draft',kind,price:a.price,end_price:b.price,
+      if(['rectangle','fib','trendline','ghost_feed'].includes(kind))return {id:'draft',kind,price:a.price,end_price:b.price,
         anchor_start:a.time,anchor_end:b.time};
       const diff=Math.abs(last.price-first.price);
       if(diff<=0||!Number.isFinite(diff))return null;
@@ -179,7 +165,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const onPointerDown=(event)=>{
       pointerStart={x:event.clientX,y:event.clientY};
       const kind=drawingModeRef.current;
-      if(busyRef.current||event.button!==0||!['rectangle','fib','long_position','short_position'].includes(kind))return;
+      if(busyRef.current||event.button!==0||!['rectangle','fib','ghost_feed','long_position','short_position'].includes(kind))return;
       const anchor=point(event);
       if(!anchor)return;
       dragStart={anchor,x:event.clientX,y:event.clientY,kind};
@@ -189,7 +175,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const onPointerMove=event=>{
       const p=point(event);
       if(!dragStart){
-        if(firstAnchor.current&&p&&['trendline','rectangle','fib'].includes(drawingModeRef.current))
+        if(firstAnchor.current&&p&&['trendline','rectangle','fib','ghost_feed'].includes(drawingModeRef.current))
           setDraftShape(makeDraft(firstAnchor.current,p,drawingModeRef.current));
         return;
       }
@@ -207,7 +193,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
         resetAnchor();setDraftShape(null);
         const {id,...payload}=drawing;
         onNewLineRef.current?.(payload);
-      }else if(['rectangle','fib'].includes(start.kind)){
+      }else if(['rectangle','fib','ghost_feed'].includes(start.kind)){
         if(firstAnchor.current){
           const completed=p?makeDraft(firstAnchor.current,p,start.kind):null;
           if(completed){resetAnchor();setDraftShape(null);
@@ -234,7 +220,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const onClick=(event) => {
       if(!drawingModeRef.current){setSelectedDrawing(null);return;}
       if (busyRef.current ||
-          ['rectangle','fib','long_position','short_position'].includes(drawingModeRef.current) || !pointerStart ||
+          ['rectangle','fib','ghost_feed','long_position','short_position'].includes(drawingModeRef.current) || !pointerStart ||
           Math.hypot(event.clientX-pointerStart.x,event.clientY-pointerStart.y)>5) return;
       const bounds=pane.getBoundingClientRect();
       const scale=chart.timeScale();
@@ -328,13 +314,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     }
   }, [candles,timeframe,sessionId]);
 
-  useEffect(()=>{
-    const ghost=ghostSeriesRef.current;
-    if(!ghost)return;
-    ghost.setData(ghostVisible?ghostBars:[]);
-  },[ghostVisible,ghostBars]);
-
-  useEffect(()=>{
+   useEffect(()=>{
     const scale=chartRef.current?.timeScale();
     if(!scale)return;
     const save=range=>{
@@ -478,7 +458,9 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       series={candleSeriesRef} candles={candles} disabled={positionLocked||paperPosition.status!=='open'}
       onAdjust={onAdjustPosition}/>}
     {(shapes.length>0||draftShape)&&<ShapeOverlay chart={chartRef} series={candleSeriesRef}
-      drawings={shapes} draft={draftShape} selected={selectedDrawing} onSelect={setSelectedDrawing} orders={orders}
+      drawings={shapes} draft={draftShape?.kind==='ghost_feed'?{
+        ...draftShape,ghost_range:ghostRange,ghost_variance:ghostVariance,timeframe
+      }:draftShape} selected={selectedDrawing} onSelect={setSelectedDrawing} orders={orders}
       onEdit={onUpdateDrawing} disabled={busy||positionLocked}/>}
     <DrawingTools open={toolMenu} onOpen={showToolMenu} mode={drawingMode}
       disabled={busy||!sessionId} onSelect={onDrawingMode} onTrade={onTradeShortcut}/>
@@ -510,7 +492,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
           ({'1m':60000,'5m':300000,'15m':900000,'30m':1800000,'1h':3600000,
             '4h':14400000,'1d':86400000,'1w':604800000}[timeframe]||3600000)))} bars
       </span>}
-      {['rectangle','fib','long_position','short_position'].includes(drawingMode)&&
+      {['rectangle','fib','ghost_feed','long_position','short_position'].includes(drawingMode)&&
         <span role="status">Drag to draw · tap to place Long/Short · Esc to cancel</span>}
       {drawingListOpen&&<section id="chart-drawing-list" className="chart-drawing-list" aria-label="Saved drawings">
         {drawings.length===0?<p>No drawings at this cursor</p>:<>
@@ -535,30 +517,16 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
         type="color" value={chosen?.color||drawingColor} onChange={e=>chooseColor(e.target.value)}/></label>
       {chosen&&<button onClick={()=>setSelectedDrawing(null)}>Deselect</button>}
     </div>
-    <div className="ghost-controls">
-      <button aria-expanded={ghostOpen} aria-controls="ghost-scenario-controls"
-        onClick={()=>setGhostOpen(v=>!v)}>Ghost candles {ghostVisible?'ON':'OFF'}</button>
-      {ghostOpen&&<div id="ghost-scenario-controls" className="ghost-settings">
-        <strong>MANUAL FUTURE SCENARIO</strong>
-        <p>Hypothetical only. Not real candles, signals, or replay data.</p>
-        <label><input type="checkbox" checked={ghostVisible}
-          onChange={e=>setGhostVisible(e.target.checked)}/> Show ghost candles</label>
-        <label>Projected candles <input aria-label="Ghost candle count" type="number" min="1" max="20" step="1"
-          value={ghostCount} onChange={e=>setGhostCount(Math.min(20,Math.max(1,Number(e.target.value)||1)))}/></label>
-        <label>Price move % <input aria-label="Ghost projected move percent" type="number"
-          min="-25" max="25" step=".1" value={ghostMove}
-          onChange={e=>setGhostMove(Math.min(25,Math.max(-25,Number(e.target.value)||0)))}/></label>
-        <label>Wick % <input aria-label="Ghost wick percent" type="number"
-          min="0" max="5" step=".1" value={ghostWick}
-          onChange={e=>setGhostWick(Math.min(5,Math.max(0,Number(e.target.value)||0)))}/></label>
-        <button onClick={()=>{
-          chartRef.current?.timeScale().setVisibleLogicalRange({
-            from:Math.max(0,candles.length-65),to:candles.length+Math.max(12,ghostCount+6)
-          });
-        }}>Show future area</button>
-      </div>}
-    </div>
-    {ghostVisible&&<div className="ghost-watermark">SCENARIO ONLY · NOT REAL MARKET DATA</div>}
+    {drawingMode==='ghost_feed'&&<div className="ghost-controls ghost-feed-editor">
+      <strong>GHOST FEED · Draw</strong>
+      <label>Avg HL % <input aria-label="Ghost avg range percent" type="number"
+        min=".01" max="20" step=".05" value={ghostRange}
+        onChange={e=>setGhostRange(Math.max(.01,Math.min(20,Number(e.target.value)||.01)))}/></label>
+      <label>Variance % <input aria-label="Ghost feed variance percent" type="number"
+        min="0" max="10" step=".05" value={ghostVariance}
+        onChange={e=>setGhostVariance(Math.max(0,Math.min(10,Number(e.target.value)||0)))}/></label>
+      <span>Click point 1, move cursor and click point 2. Hypothetical candles only.</span>
+    </div>}
     <div className="chart-view-tools">
       <button onClick={()=>chartRef.current?.timeScale().fitContent()}>Fit</button>
       <button onClick={reset}>Reset</button>

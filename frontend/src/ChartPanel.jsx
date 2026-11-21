@@ -6,7 +6,8 @@ import ShapeOverlay from './ShapeOverlay.jsx';
 import {calculateIndicator, INDICATORS, INDICATOR_SETTINGS, DEFAULT_INDICATOR_OPTIONS} from './indicators.js';
 import {FIB_LEVELS} from './research.js';
 
-export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, onUpdateDrawing, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut }) {
+export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, onUpdateDrawing, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut,
+  selectedDrawing, onSelectDrawing, orders=[] }) {
   const rootRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -55,7 +56,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     setToolMenu(open);
     if(open){setDrawingListOpen(false);setIndicatorMenu(false);}
   };
-  const [selectedDrawing,setSelectedDrawing] = React.useState(null);
+  const setSelectedDrawing=onSelectDrawing;
   const [draftShape,setDraftShape] = React.useState(null);
   const chosen=drawings.find(d=>d.id===selectedDrawing);
   const chooseColor=value=>{
@@ -64,6 +65,23 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     if(chosen)onUpdateDrawing(chosen.id,{color:value});
   };
   busyRef.current = busy;
+  React.useEffect(()=>{
+    const handler=event=>{
+      const el=event.target;
+      if(el?.closest?.('input,textarea,select,[contenteditable="true"]')||
+        event.ctrlKey||event.metaKey||event.altKey)return;
+      if(event.key==='Escape'){
+        if(selectedDrawing){setSelectedDrawing(null);event.preventDefault();}
+        return;
+      }
+      if(['Delete','Backspace'].includes(event.key)&&selectedDrawing&&!busy){
+        event.preventDefault();onRemoveDrawing?.(selectedDrawing);
+        setSelectedDrawing(null);
+      }
+    };
+    document.addEventListener('keydown',handler);
+    return()=>document.removeEventListener('keydown',handler);
+  },[selectedDrawing,busy,onRemoveDrawing,onSelectDrawing]);
   const resetAnchor = () => {
     firstAnchor.current = null;
     setAwaitingEnd(false);
@@ -332,6 +350,35 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   },[drawings,timeframe,selectedDrawing]);
 
   useEffect(()=>{
+    const series=indicatorMarkers.current;
+    if(!series)return;
+    const bars=new Set(candles.map(c=>c.time/1000));
+    const tradeMarkers=orders.flatMap(order=>{
+      const direction=order.side==='long';
+      const output=[];
+      if(order.entry_ms!=null){
+        const target=candles.findLast(c=>c.time<=order.entry_ms && c.time+(timeframe==='1m'?60000:0)>0);
+        if(target&&bars.has(target.time/1000))output.push({
+          time:target.time/1000,position:direction?'belowBar':'aboveBar',
+          color:direction?'#45d5b1':'#ff8b93',shape:direction?'arrowUp':'arrowDown',
+          text:(direction?'LONG':'SHORT')+' '+order.entry_price.toFixed(2)
+        });
+      }
+      if(order.exit_ms!=null&&order.status==='closed'){
+        const target=candles.findLast(c=>c.time<=order.exit_ms);
+        if(target&&bars.has(target.time/1000))output.push({
+          time:target.time/1000,position:direction?'aboveBar':'belowBar',
+          color:order.pnl>=0?'#45d5b1':'#ff647b',shape:'circle',
+          text:(order.exit_reason||'EXIT').toUpperCase()+' '+(order.pnl>=0?'+':'')+order.pnl.toFixed(2)
+        });
+      }
+      return output;
+    });
+    const indicators=activeIndicators.flatMap(item=>item.markers||[]);
+    series.setMarkers([...indicators,...tradeMarkers].sort((a,b)=>a.time-b.time));
+  },[activeIndicators,orders,candles,timeframe]);
+
+  useEffect(()=>{
     const chart=chartRef.current;
     if(!chart)return;
     const next=new Set(activeIndicators.flatMap(item=>(item.series||[]).map(line=>item.id+line.label)));
@@ -355,8 +402,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
         series.setData(line.points);
       }
     }
-    const markers=activeIndicators.flatMap(item=>item.markers||[]).sort((a,b)=>a.time-b.time);
-    indicatorMarkers.current?.setMarkers(markers);
+    // Signal and executed-trade markers share the main candlestick series.
   },[activeIndicators]);
 
   useEffect(()=>{

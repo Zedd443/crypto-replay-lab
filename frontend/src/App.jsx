@@ -21,6 +21,8 @@ export default function App() {
   const [candles,setCandles]=useState([]);
   const [tf,setTf]=useState('1h');
   const [drawings,setDrawings]=useState([]);
+  const [selectedDrawing,setSelectedDrawing]=useState(null);
+  const activePlan=drawings.find(d=>d.id===selectedDrawing&&['long_position','short_position'].includes(d.kind));
   const [orders,setOrders]=useState([]);
   const [showOrders,setShowOrders]=useState(true);
   const [selectedPosition,setSelectedPosition]=useState(null);
@@ -133,7 +135,7 @@ export default function App() {
     const created=await post('/api/sessions',{dataset_id:datasetId,start});
     await refreshSession(created.id,'1h');
     localStorage.setItem('crl-session',created.id);
-    setSelected(datasetId);setTf('1h');setDrawingMode(null);
+    setSelected(datasetId);setTf('1h');setDrawingMode(null);setSelectedDrawing(null);
   };
 
   const newSession=(datasetId=selected,start='random')=>run(async()=>{
@@ -164,8 +166,9 @@ export default function App() {
 
   const addLine=(drawing)=>run(async()=>{
     if(!session)return;
-    await post('/api/sessions/'+session.id+'/drawings',{...drawing,timeframe:tf});
+    const created=await post('/api/sessions/'+session.id+'/drawings',{...drawing,timeframe:tf});
     setDrawings(await api('/api/sessions/'+session.id+'/drawings'));
+    setSelectedDrawing(created.id);
   });
 
   const updateDrawing=(id,changes)=>run(async()=>{
@@ -181,6 +184,20 @@ export default function App() {
     const path='/api/sessions/'+session.id+'/drawings';
     await api(id?path+'/'+encodeURIComponent(id):path,{method:'DELETE'});
     setDrawings(await api(path));
+    if(id)setSelectedDrawing(current=>current===id?null:current);
+    else setSelectedDrawing(null);
+  });
+
+  const placeFromDrawing=(drawingId,quantity)=>run(async()=>{
+    if(!session)return;
+    const drawing=drawings.find(d=>d.id===drawingId);
+    if(!drawing)return;
+    const side=drawing.kind==='long_position'?'long':'short';
+    const path='/api/sessions/'+session.id+'/orders';
+    const placed=await post(path,{mode:'bracket',side,quantity,
+      drawing_id:drawingId,cursor:session.cursor});
+    setSelectedPosition(placed.id);
+    setOrders(await api(path+'?cursor='+session.cursor));
   });
 
   const placeOrder=(side,quantity,tpPercent,slPercent)=>run(async()=>{
@@ -271,6 +288,7 @@ export default function App() {
         <div className="chart-with-aside">
           <ChartPanel candles={candles} timeframe={tf} sessionId={session?.id}
             drawings={drawings} drawingMode={drawingMode} onNewLine={addLine} onUpdateDrawing={updateDrawing} busy={busy}
+            selectedDrawing={selectedDrawing} onSelectDrawing={setSelectedDrawing} orders={orders}
             onDrawingMode={setDrawingMode} onRemoveDrawing={removeDrawing}
             fullscreen={Boolean(fullscreen)} onToggleFullscreen={toggleFullscreen}
             paperPosition={activePosition} onAdjustPosition={adjustPosition}
@@ -280,7 +298,9 @@ export default function App() {
             <div className="rail-heading"><strong>TRADE CONTROL</strong><span>PAPER ONLY</span></div>
             {showOrders&&session?<OrderPanel orders={orders} busy={busy} session={session}
               onPlace={placeOrder} onManage={manageOrder} activePosition={activePosition?.id}
-              onSelect={setSelectedPosition} shortcut={tradeShortcut}/>:
+              onSelect={setSelectedPosition} shortcut={tradeShortcut}
+              drawing={activePlan} onUpdateDrawing={updateDrawing} onExecuteDrawing={placeFromDrawing}
+              markPrice={candles.at(-1)?.close}/>:
               <button onClick={()=>setShowOrders(true)}>Show trade controls</button>}
           </aside>
           <aside className="sideinfo">

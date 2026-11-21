@@ -98,6 +98,9 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
         );
         """)
         conn.executescript(orders.SCHEMA + brackets.SCHEMA)
+        paper_columns={column["name"] for column in conn.execute("PRAGMA table_info(paper_positions)")}
+        if "drawing_id" not in paper_columns:
+            conn.execute("ALTER TABLE paper_positions ADD COLUMN drawing_id TEXT")
         if "base_ms" not in {column["name"] for column in conn.execute("PRAGMA table_info(datasets)")}:
             conn.execute("ALTER TABLE datasets ADD COLUMN base_ms INTEGER NOT NULL DEFAULT 60000")
         drawing_columns = {column["name"] for column in conn.execute("PRAGMA table_info(drawings)")}

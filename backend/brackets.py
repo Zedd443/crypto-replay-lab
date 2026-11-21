@@ -7,7 +7,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS paper_positions (
     id TEXT PRIMARY KEY, session_id TEXT NOT NULL, side TEXT NOT NULL,
     quantity REAL NOT NULL, placed_cursor INTEGER NOT NULL,
-    entry_price REAL NOT NULL, entry_ms INTEGER NOT NULL, manual_exit_cursor INTEGER
+    entry_price REAL NOT NULL, entry_ms INTEGER NOT NULL, manual_exit_cursor INTEGER,
+    drawing_id TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_paper_positions_session ON paper_positions(session_id, placed_cursor);
 CREATE TABLE IF NOT EXISTS paper_brackets (
@@ -24,21 +25,40 @@ def mark(conn, state):
 
 
 def place(conn, state, side, quantity, payload):
-    take = float(payload["tp_percent"])
-    stop = float(payload["sl_percent"])
-    if not (0 < take < 100 and 0 < stop < 100):
-        raise ValueError("TP and SL percentages must be between 0 and 100.")
     current = mark(conn,state)
     price = current["close"]
     direction = 1 if side == "long" else -1
-    take_price = price * (1 + direction * take / 100)
-    stop_price = price * (1 - direction * stop / 100)
+    drawing_id = payload.get("drawing_id")
+    if drawing_id is not None:
+        drawing = conn.execute("""SELECT d.*,COALESCE(e.price,d.price) AS effective_price,
+            COALESCE(e.end_price,d.end_price) AS effective_stop,
+            COALESCE(e.take_profit,d.take_profit) AS effective_target
+            FROM drawings d LEFT JOIN drawing_edits e
+            ON e.drawing_id=d.id AND e.cursor=(SELECT MAX(cursor) FROM drawing_edits
+              WHERE drawing_id=d.id AND cursor<=?)
+            WHERE d.id=? AND d.session_id=? AND d.created_at_cursor<=?""",
+            (state["cursor"],drawing_id,state["id"],state["cursor"])).fetchone()
+        if drawing is None or drawing["kind"] != side+"_position":
+            raise ValueError("Selected drawing is missing or has the wrong direction.")
+        if abs(drawing["effective_price"] / price-1) > 0.001:
+            raise ValueError("Drawing entry is not at replay market price (0.1% tolerance). Adjust entry or use a separate market order.")
+        take_price=float(drawing["effective_target"])
+        stop_price=float(drawing["effective_stop"])
+    else:
+        take = float(payload["tp_percent"])
+        stop = float(payload["sl_percent"])
+        if not (0 < take < 100 and 0 < stop < 100):
+            raise ValueError("TP and SL percentages must be between 0 and 100.")
+        take_price = price * (1 + direction * take / 100)
+        stop_price = price * (1 - direction * stop / 100)
     if not valid_levels(side, price, take_price, stop_price):
         raise ValueError("Percentages must resolve to two distinct valid price levels.")
     position_id = str(uuid.uuid4())
     cursor = state["cursor"]
-    conn.execute("INSERT INTO paper_positions VALUES (?,?,?,?,?,?,?,NULL)",
-                 (position_id,state["id"],side,quantity,cursor,price,current["ts"]+state["base_ms"]))
+    conn.execute("""INSERT INTO paper_positions
+        (id,session_id,side,quantity,placed_cursor,entry_price,entry_ms,manual_exit_cursor,drawing_id)
+        VALUES (?,?,?,?,?,?,?,NULL,?)""",
+                 (position_id,state["id"],side,quantity,cursor,price,current["ts"]+state["base_ms"],drawing_id))
     conn.execute("INSERT INTO paper_brackets VALUES (?,?,?,?)",
                  (position_id,cursor,take_price,stop_price))
     return position_id
@@ -93,7 +113,7 @@ def view(conn, state, position, current):
 
     entry = position["entry_price"]
     price = current["close"] if exit_price is None else exit_price
-    return {key:position[key] for key in ("id","side","quantity","entry_price","entry_ms")} | {
+    return {key:position[key] for key in ("id","side","quantity","entry_price","entry_ms","drawing_id")} | {
         "mode":"bracket","status":"closed" if reason else "open",
         "take_profit":take,"stop_loss":stop,"exit_reason":reason,
         "exit_price":exit_price,"exit_ms":exit_ms,

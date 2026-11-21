@@ -6,7 +6,8 @@ import ShapeOverlay from './ShapeOverlay.jsx';
 import {calculateIndicator, INDICATORS, INDICATOR_SETTINGS, DEFAULT_INDICATOR_OPTIONS} from './indicators.js';
 import {FIB_LEVELS} from './research.js';
 
-export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, onUpdateDrawing, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut }) {
+export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, onUpdateDrawing, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut,
+  selectedDrawing, onSelectDrawing, orders=[], onSignalSelection }) {
   const rootRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -16,7 +17,9 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const chartLinesRef = useRef([]);
   const drawingPriceLabelsRef = useRef([]);
   const candlesRef=useRef(candles);
+  const timeframeRef=useRef(timeframe);
   candlesRef.current=candles;
+  timeframeRef.current=timeframe;
   const trendlinesRef = useRef([]);
   const indicatorSeries = useRef(new Map());
   const indicatorMarkers = useRef(null);
@@ -32,6 +35,10 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const [drawingColor,setDrawingColor]=React.useState(()=>{
     try{return localStorage.getItem('crl-drawing-color')||'#f0c266';}catch{return '#f0c266';}
   });
+  React.useEffect(()=>{
+    const marker=INDICATORS.find(([id,,kind])=>kind==='marker'&&enabled.includes(id));
+    if(marker)onSignalSelection?.({id:marker[0],parameters:parameters[marker[0]]});
+  },[enabled,parameters,onSignalSelection]);
   const activeIndicators=React.useMemo(()=>INDICATORS.filter(([id])=>enabled.includes(id))
     .map(([id,label,kind])=>({id,label,kind,...calculateIndicator(id,candles,parameters[id])})),
     [enabled,candles,parameters]);
@@ -50,12 +57,12 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const [toolMenu,setToolMenu] = React.useState(false);
   const hasOpenPosition=paperPosition?.status==='open';
   const shapes=React.useMemo(()=>drawings.filter(d=>d.timeframe===timeframe &&
-    ['horizontal_ray','vertical','rectangle','fib','long_position','short_position'].includes(d.kind)),[drawings,timeframe]);
+    ['horizontal_ray','vertical','trendline','rectangle','fib','long_position','short_position'].includes(d.kind)),[drawings,timeframe]);
   const showToolMenu=open=>{
     setToolMenu(open);
     if(open){setDrawingListOpen(false);setIndicatorMenu(false);}
   };
-  const [selectedDrawing,setSelectedDrawing] = React.useState(null);
+  const setSelectedDrawing=onSelectDrawing;
   const [draftShape,setDraftShape] = React.useState(null);
   const chosen=drawings.find(d=>d.id===selectedDrawing);
   const chooseColor=value=>{
@@ -64,6 +71,23 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     if(chosen)onUpdateDrawing(chosen.id,{color:value});
   };
   busyRef.current = busy;
+  React.useEffect(()=>{
+    const handler=event=>{
+      const el=event.target;
+      if(el?.closest?.('input,textarea,select,[contenteditable="true"]')||
+        event.ctrlKey||event.metaKey||event.altKey)return;
+      if(event.key==='Escape'){
+        if(selectedDrawing){setSelectedDrawing(null);event.preventDefault();}
+        return;
+      }
+      if(['Delete','Backspace'].includes(event.key)&&selectedDrawing&&!busy){
+        event.preventDefault();onRemoveDrawing?.(selectedDrawing);
+        setSelectedDrawing(null);
+      }
+    };
+    document.addEventListener('keydown',handler);
+    return()=>document.removeEventListener('keydown',handler);
+  },[selectedDrawing,busy,onRemoveDrawing,onSelectDrawing]);
   const resetAnchor = () => {
     firstAnchor.current = null;
     setAwaitingEnd(false);
@@ -122,7 +146,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const makeDraft=(first,last,kind)=>{
       if(!first||!last||first.time===last.time)return null;
       const [a,b]=first.time<last.time?[first,last]:[last,first];
-      if(kind==='rectangle'||kind==='fib')return {id:'draft',kind,price:a.price,end_price:b.price,
+      if(['rectangle','fib','trendline'].includes(kind))return {id:'draft',kind,price:a.price,end_price:b.price,
         anchor_start:a.time,anchor_end:b.time};
       const diff=Math.abs(last.price-first.price);
       if(diff<=0||!Number.isFinite(diff))return null;
@@ -144,8 +168,12 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       event.preventDefault();event.stopPropagation();
     };
     const onPointerMove=event=>{
-      if(!dragStart)return;
       const p=point(event);
+      if(!dragStart){
+        if(firstAnchor.current&&p&&['trendline','rectangle','fib'].includes(drawingModeRef.current))
+          setDraftShape(makeDraft(firstAnchor.current,p,drawingModeRef.current));
+        return;
+      }
       setDraftShape(p?makeDraft(dragStart.anchor,p,dragStart.kind):null);
       event.preventDefault();event.stopPropagation();
     };
@@ -154,11 +182,20 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       const start=dragStart;
       const p=point(event);
       const drawing=p?makeDraft(start.anchor,p,start.kind):null;
-      dragStart=null;setDraftShape(null);
-      if(drawing&&Math.abs(event.clientX-start.x)>7&&Math.abs(event.clientY-start.y)>3){
+      dragStart=null;
+      const moved=Math.abs(event.clientX-start.x)>7&&Math.abs(event.clientY-start.y)>3;
+      if(drawing&&moved){
+        resetAnchor();setDraftShape(null);
         const {id,...payload}=drawing;
         onNewLineRef.current?.(payload);
+      }else if(['rectangle','fib'].includes(start.kind)){
+        if(firstAnchor.current){
+          const completed=p?makeDraft(firstAnchor.current,p,start.kind):null;
+          if(completed){resetAnchor();setDraftShape(null);
+            const {id,...payload}=completed;onNewLineRef.current?.(payload);}
+        }else{firstAnchor.current=start.anchor;setAwaitingEnd(true);}
       }else if(['long_position','short_position'].includes(start.kind)){
+        setDraftShape(null);
         // One-click placement: default SL 1%, TP 2%; immediately editable.
         const anchor=start.anchor,scale=chart.timeScale(),bounds=pane.getBoundingClientRect();
         const x=event.clientX-bounds.left-chart.priceScale('left').width();
@@ -205,10 +242,14 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
         return;
       }
       if (firstAnchor.current.time === anchor.time) return;
-      const [start,end] = [firstAnchor.current,anchor].sort((a,b)=>a.time-b.time);
-      resetAnchor();
-      onNewLineRef.current({kind,price:start.price,end_price:end.price,
-        anchor_start:start.time,anchor_end:end.time});
+      const draft=makeDraft(firstAnchor.current,anchor,kind);
+      resetAnchor();setDraftShape(null);
+      if(draft){const {id,...drawing}=draft;onNewLineRef.current(drawing);}
+      else{
+        const [start,end]=[firstAnchor.current,anchor].sort((a,b)=>a.time-b.time);
+        onNewLineRef.current({kind,price:start.price,end_price:end.price,
+          anchor_start:start.time,anchor_end:end.time});
+      }
     };
     pane?.addEventListener('pointerdown',onPointerDown,true);
     pane?.addEventListener('pointermove',onPointerMove,true);
@@ -332,6 +373,35 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   },[drawings,timeframe,selectedDrawing]);
 
   useEffect(()=>{
+    const series=indicatorMarkers.current;
+    if(!series)return;
+    const bars=new Set(candles.map(c=>c.time/1000));
+    const tradeMarkers=orders.flatMap(order=>{
+      const direction=order.side==='long';
+      const output=[];
+      if(order.entry_ms!=null){
+        const target=candles.findLast(c=>c.time<=order.entry_ms && c.time+(timeframe==='1m'?60000:0)>0);
+        if(target&&bars.has(target.time/1000))output.push({
+          time:target.time/1000,position:direction?'belowBar':'aboveBar',
+          color:direction?'#45d5b1':'#ff8b93',shape:direction?'arrowUp':'arrowDown',
+          text:(direction?'LONG':'SHORT')+' '+order.entry_price.toFixed(2)
+        });
+      }
+      if(order.exit_ms!=null&&order.status==='closed'){
+        const target=candles.findLast(c=>c.time<=order.exit_ms);
+        if(target&&bars.has(target.time/1000))output.push({
+          time:target.time/1000,position:direction?'aboveBar':'belowBar',
+          color:order.pnl>=0?'#45d5b1':'#ff647b',shape:'circle',
+          text:(order.exit_reason||'EXIT').toUpperCase()+' '+(order.pnl>=0?'+':'')+order.pnl.toFixed(2)
+        });
+      }
+      return output;
+    });
+    const indicators=activeIndicators.flatMap(item=>item.markers||[]);
+    series.setMarkers([...indicators,...tradeMarkers].sort((a,b)=>a.time-b.time));
+  },[activeIndicators,orders,candles,timeframe]);
+
+  useEffect(()=>{
     const chart=chartRef.current;
     if(!chart)return;
     const next=new Set(activeIndicators.flatMap(item=>(item.series||[]).map(line=>item.id+line.label)));
@@ -355,8 +425,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
         series.setData(line.points);
       }
     }
-    const markers=activeIndicators.flatMap(item=>item.markers||[]).sort((a,b)=>a.time-b.time);
-    indicatorMarkers.current?.setMarkers(markers);
+    // Signal and executed-trade markers share the main candlestick series.
   },[activeIndicators]);
 
   useEffect(()=>{
@@ -385,7 +454,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       series={candleSeriesRef} candles={candles} disabled={positionLocked||paperPosition.status!=='open'}
       onAdjust={onAdjustPosition}/>}
     {(shapes.length>0||draftShape)&&<ShapeOverlay chart={chartRef} series={candleSeriesRef}
-      drawings={shapes} draft={draftShape} selected={selectedDrawing} onSelect={setSelectedDrawing}
+      drawings={shapes} draft={draftShape} selected={selectedDrawing} onSelect={setSelectedDrawing} orders={orders}
       onEdit={onUpdateDrawing} disabled={busy||positionLocked}/>}
     <DrawingTools open={toolMenu} onOpen={showToolMenu} mode={drawingMode}
       disabled={busy||!sessionId} onSelect={onDrawingMode} onTrade={onTradeShortcut}/>
@@ -409,7 +478,14 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
         </div>)}
         <p>Indicators are research aids, not validated buy/sell signals.</p>
       </section>}
-      {awaitingEnd&&<span role="status">Pick second point</span>}
+      {awaitingEnd&&<span role="status">Move cursor to preview · click second point · Esc to cancel</span>}
+      {draftShape?.kind&&<span className="draft-measure" role="status">
+        {Math.abs(draftShape.end_price-draftShape.price).toFixed(3)} Δ ·
+        {(100*(draftShape.end_price/draftShape.price-1)).toFixed(2)}% ·
+        {Math.max(1,Math.round(Math.abs(draftShape.anchor_end-draftShape.anchor_start)/
+          ({'1m':60000,'5m':300000,'15m':900000,'30m':1800000,'1h':3600000,
+            '4h':14400000,'1d':86400000,'1w':604800000}[timeframe]||3600000)))} bars
+      </span>}
       {['rectangle','fib','long_position','short_position'].includes(drawingMode)&&
         <span role="status">Drag to draw · tap to place Long/Short · Esc to cancel</span>}
       {drawingListOpen&&<section id="chart-drawing-list" className="chart-drawing-list" aria-label="Saved drawings">

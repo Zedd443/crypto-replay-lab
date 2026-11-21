@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ChartPanel from './ChartPanel.jsx';
+import OrderPanel from './OrderPanel.jsx';
 
 const TFS=['1m','5m','15m','30m','1h','4h','1d','1w'];
+const baseTf=(ms)=>ms===900000?'15m':'1m';
 
 async function api(path,options) {
   const response=await fetch(path,options);
@@ -18,10 +20,46 @@ export default function App() {
   const [candles,setCandles]=useState([]);
   const [tf,setTf]=useState('1h');
   const [drawings,setDrawings]=useState([]);
-  const [lineMode,setLineMode]=useState(false);
-  const [resetSignal,setResetSignal]=useState(0);
-  const [fitSignal,setFitSignal]=useState(0);
-  const [busy,setBusy]=useState(false);
+  const [orders,setOrders]=useState([]);
+  const [showOrders,setShowOrders]=useState(false);
+  const [selectedPosition,setSelectedPosition]=useState(null);
+  const [tradeShortcut,setTradeShortcut]=useState(null);
+  const openTradeShortcut=side=>{setShowOrders(true);setTradeShortcut({side});};
+  const openBrackets=orders.filter(order=>order.mode==='bracket' && order.status==='open');
+  const activePosition=orders.find(order=>order.mode==='bracket'&&order.id===selectedPosition)||openBrackets.at(-1);
+  const chartShell=useRef(null);
+  const [fullscreen,setFullscreen]=useState(null);
+
+  useEffect(()=>{
+    const sync=()=>setFullscreen(mode=>document.fullscreenElement===chartShell.current?'browser':
+      mode==='browser'?null:mode);
+    const escape=event=>{
+      if(event.key==='Escape')setFullscreen(mode=>mode==='window'?null:mode);
+    };
+    document.addEventListener('fullscreenchange',sync);
+    document.addEventListener('keydown',escape);
+    return ()=>{
+      document.removeEventListener('fullscreenchange',sync);
+      document.removeEventListener('keydown',escape);
+    };
+  },[]);
+
+  const toggleFullscreen=async()=>{
+    if(fullscreen==='browser'){
+      await document.exitFullscreen();
+    }else if(fullscreen==='window'){
+      setFullscreen(null);
+    }else{
+      try{
+        await chartShell.current.requestFullscreen();
+      }catch{
+        setFullscreen('window');
+      }
+    }
+  };
+  const [drawingMode,setDrawingMode]=useState(null);
+  const [syncStatus,setSyncStatus]=useState('');
+  const [busy,setBusy]=useState(true);
   const [error,setError]=useState('');
   const [symbol,setSymbol]=useState('BTCUSDT');
   const [upload,setUpload]=useState(null);
@@ -35,12 +73,15 @@ export default function App() {
   };
 
   const refreshSession=async(sid,timeframe=tf)=>{
-    const [state,candleData,drawData]=await Promise.all([
-      api(`/api/sessions/${sid}`),
-      api(`/api/sessions/${sid}/candles?tf=${timeframe}`),
-      api(`/api/sessions/${sid}/drawings`),
+    const path='/api/sessions/'+sid;
+    const state=await api(path);
+    const [candleData,drawData,orderData]=await Promise.all([
+      api(path+'/candles?tf='+timeframe),
+      api(path+'/drawings'),
+      api(path+'/orders?cursor='+state.cursor),
     ]);
-    setSession(state);setCandles(candleData.candles);setDrawings(drawData);
+    if(candleData.clock_ms!==state.clock_ms)throw new Error('Replay cursor changed while loading candles.');
+    setSession(state);setCandles(candleData.candles);setDrawings(drawData);setOrders(orderData);
     return state;
   };
 
@@ -59,21 +100,24 @@ export default function App() {
               setSession(state);setSelected(state.dataset_id);
               const candlesPayload=await api(`/api/sessions/${saved}/candles?tf=1h`);
               const drawingsPayload=await api(`/api/sessions/${saved}/drawings`);
-              setCandles(candlesPayload.candles);setDrawings(drawingsPayload);
+              const orderPayload=await api(`/api/sessions/${saved}/orders?cursor=${state.cursor}`);
+              if(active){
+                setCandles(candlesPayload.candles);setDrawings(drawingsPayload);setOrders(orderPayload);
+              }
             }
             return;
           }catch { localStorage.removeItem('crl-session'); }
         }
-        const initial=data.find(d=>d.id==='synthetic-demo')||data[0];
+        const initial=data.find(d=>d.id==='raw:BTCUSDT')||data.find(d=>d.id==='synthetic-demo')||data[0];
         if(initial && active){
-          const created=await post('/api/sessions',{dataset_id:initial.id});
+          const created=await post('/api/sessions',{dataset_id:initial.id,start:'random'});
           if(!active)return;
           localStorage.setItem('crl-session',created.id);
           setSelected(initial.id);setSession(created);
           const payload=await api(`/api/sessions/${created.id}/candles?tf=1h`);
           setCandles(payload.candles);
         }
-      }catch(e){if(active)setError(e.message);}
+      }catch(e){if(active)setError(e.message);}finally{if(active)setBusy(false);}
     })();
     return()=>{active=false;};
   },[]);
@@ -84,11 +128,25 @@ export default function App() {
     try{await fn();}catch(e){setError(e.message);}finally{setBusy(false);}
   };
 
-  const newSession=()=>run(async()=>{
-    const created=await post('/api/sessions',{dataset_id:selected});
-    localStorage.setItem('crl-session',created.id);
-    setTf('1h');setLineMode(false);
+  const openReplay=async(datasetId,start)=>{
+    const created=await post('/api/sessions',{dataset_id:datasetId,start});
     await refreshSession(created.id,'1h');
+    localStorage.setItem('crl-session',created.id);
+    setSelected(datasetId);setTf('1h');setDrawingMode(null);
+  };
+
+  const newSession=(datasetId=selected,start='random')=>run(async()=>{
+    setSyncStatus('');
+    await openReplay(datasetId,start);
+  });
+
+  const syncLatest=()=>run(async()=>{
+    if(!session)return;
+    setSyncStatus('');
+    const result=await post('/api/datasets/'+encodeURIComponent(session.dataset_id)+'/sync',{});
+    await openReplay(session.dataset_id,'latest');
+    const last=new Date(result.last_ms+900000).toISOString().slice(0,16).replace('T',' ');
+    setSyncStatus(last+' UTC'+(result.added?' / +'+result.added+' candles':''));
   });
 
   const step=(amount)=>run(async()=>{
@@ -99,17 +157,48 @@ export default function App() {
 
   const changeTf=(value)=>run(async()=>{
     if(!session)return;
-    setTf(value);
     await refreshSession(session.id,value);
+    setTf(value);
   });
 
-  const addLine=(price)=>run(async()=>{
+  const addLine=(drawing)=>run(async()=>{
     if(!session)return;
-    await post(`/api/sessions/${session.id}/drawings`,{
-      kind:'horizontal',timeframe:tf,price,
-    });
-    setDrawings(await api(`/api/sessions/${session.id}/drawings`));
-    setLineMode(false);
+    await post('/api/sessions/'+session.id+'/drawings',{...drawing,timeframe:tf});
+    setDrawings(await api('/api/sessions/'+session.id+'/drawings'));
+  });
+
+  const removeDrawing=(id)=>run(async()=>{
+    if(!session)return;
+    const path='/api/sessions/'+session.id+'/drawings';
+    await api(id?path+'/'+encodeURIComponent(id):path,{method:'DELETE'});
+    setDrawings(await api(path));
+  });
+
+  const placeOrder=(side,quantity,tpPercent,slPercent)=>run(async()=>{
+    const path='/api/sessions/'+session.id+'/orders';
+    const placed=await post(path,{side,quantity,cursor:session.cursor,
+      mode:'bracket',tp_percent:tpPercent,sl_percent:slPercent});
+    setSelectedPosition(placed.id);
+    setOrders(await api(path+'?cursor='+session.cursor));
+  });
+
+  const manageOrder=(id,action)=>run(async()=>{
+    const path='/api/sessions/'+session.id+'/orders';
+    if(action==='cancel'){
+      await api(path+'/'+id,{method:'DELETE'});
+    }else if(action==='close-now'){
+      await post('/api/sessions/'+session.id+'/paper-positions/'+id+'/close',{cursor:session.cursor});
+    }else{
+      await post(path+'/'+id+'/close',{cursor:session.cursor});
+    }
+    setOrders(await api(path+'?cursor='+session.cursor));
+  });
+
+  const adjustPosition=(id,key,value)=>run(async()=>{
+    const path='/api/sessions/'+session.id;
+    await api(path+'/paper-positions/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({cursor:session.cursor,[key]:value})});
+    setOrders(await api(path+'/orders?cursor='+session.cursor));
   });
 
   const importFile=()=>run(async()=>{
@@ -126,7 +215,6 @@ export default function App() {
     setUpload(null);
   });
 
-  const active=datasets.find(d=>d.id===session?.dataset_id);
   const date=session ? new Date(session.clock_ms).toISOString().replace('T',' ').slice(0,16)+' UTC':'—';
 
   return <div className="app">
@@ -136,35 +224,49 @@ export default function App() {
     </header>
     <main className="workspace">
       <section className="headline">
-        <div><h1>Replay workstation</h1><p>Deterministic UTC replay · Synthetic demo or imported Binance futures 1m data</p></div>
-        <div className="headline-actions"><button onClick={()=>setShowData(!showData)}>Data / import</button><button className="accent" disabled={busy} onClick={newSession}>New replay</button></div>
+        <div><h1>Replay workstation</h1><p>UTC replay · Local Parquet, Binance 1m imports, and synthetic demo</p></div>
+        <div className="headline-actions"><button onClick={()=>setShowData(!showData)}>Data / import</button><button className="accent" disabled={busy} onClick={()=>newSession()}>New replay</button></div>
       </section>
       {error&&<div className="alert" role="alert">{error}</div>}
       {showData&&<section className="panel data-panel">
         <strong>Import historical Binance USDT-M 1-minute klines</strong>
         <p>Supports CSV/ZIP (max 30MB upload). Ensure chronological 1m data; gaps are flagged. No API key.</p>
         <div className="data-actions">
-          <label>Dataset<select value={selected} onChange={e=>setSelected(e.target.value)}>{datasets.map(d=><option key={d.id} value={d.id}>{d.symbol} ({d.candles?.toLocaleString()} bars){d.is_demo?' — SYNTHETIC':''}{d.gap_count?' — GAPS':''}</option>)}</select></label>
+          <label>Dataset<select value={selected} onChange={e=>setSelected(e.target.value)}>{datasets.map(d=><option key={d.id} value={d.id}>{d.symbol} · {baseTf(d.base_ms)}{d.candles!=null?' ('+d.candles.toLocaleString()+' bars)':''}{d.is_demo?' — SYNTHETIC':''}{d.gap_count?' — GAPS':''}</option>)}</select></label>
           <label>Symbol<input value={symbol} onChange={e=>setSymbol(e.target.value)}/></label>
           <label>File<input type="file" accept=".csv,.zip" onChange={e=>setUpload(e.target.files?.[0]||null)}/></label>
           <button disabled={busy} onClick={importFile}>Import</button>
         </div>
         <p>After selecting a dataset, press <strong>New replay</strong> to start a new session.</p>
       </section>}
-      <section className="panel chart-shell">
+      <section ref={chartShell} className="panel chart-shell" data-fullscreen={fullscreen||undefined}>
         <div className="toolbar">
-          <div className="instrument"><span>{blind?'ASSET X':(active?.symbol||'Loading...')}</span><span className="muted">{active?.is_demo?'SYNTHETIC DATA':''}</span></div>
-          <div className="tf-list">{TFS.map(t=><button className={tf===t?'active':''} key={t} disabled={busy||!session} onClick={()=>changeTf(t)}>{t.toUpperCase()}</button>)}</div>
+          <div className="instrument">
+            {blind?<span>ASSET X</span>:<select aria-label="Symbol" disabled={busy} value={session?.dataset_id||''}
+              onChange={e=>newSession(e.target.value)}>
+              {!session&&<option value="">Loading...</option>}
+              {[...datasets].sort((a,b)=>a.symbol.localeCompare(b.symbol)).map(d=>
+                <option key={d.id} value={d.id}>{d.symbol} / {baseTf(d.base_ms)}</option>)}
+            </select>}
+          </div>
+          <div className="tf-list">{TFS.map(t=><button className={tf===t?'active':''} key={t} disabled={busy||!session||TFS.indexOf(t)<TFS.indexOf(baseTf(session.base_ms))} onClick={()=>changeTf(t)}>{t.toUpperCase()}</button>)}</div>
           <div className="toolbar-right">
-            <button className={lineMode?'active':''} onClick={()=>setLineMode(!lineMode)} title="Click chart to place horizontal line">+ S/R line</button>
-            <button onClick={()=>setFitSignal(n=>n+1)}>Fit</button>
-            <button onClick={()=>setResetSignal(n=>n+1)}>Auto/reset</button>
+            <button aria-expanded={showOrders} disabled={!session} onClick={()=>setShowOrders(open=>!open)}>
+              Trade{orders.length>0?' ('+orders.length+')':''}
+            </button>
+            <button disabled={busy||!session} onClick={()=>newSession(session.dataset_id,'latest')}>Latest local</button>
+            {session?.dataset_id.startsWith('raw:')&&<button disabled={busy} onClick={syncLatest}>Sync Binance</button>}
+            {syncStatus&&<span className="muted" role="status">{syncStatus}</span>}
           </div>
         </div>
         <div className="chart-with-aside">
           <ChartPanel candles={candles} timeframe={tf} sessionId={session?.id}
-            drawings={drawings} drawingMode={lineMode} onNewLine={addLine}
-            resetSignal={resetSignal} fitSignal={fitSignal}/>
+            drawings={drawings} drawingMode={drawingMode} onNewLine={addLine} busy={busy}
+            onDrawingMode={setDrawingMode} onRemoveDrawing={removeDrawing}
+            fullscreen={Boolean(fullscreen)} onToggleFullscreen={toggleFullscreen}
+            paperPosition={activePosition} onAdjustPosition={adjustPosition}
+            positionLocked={busy||session?.cursor!==session?.max_seen_cursor}
+            onTradeShortcut={openTradeShortcut}/>
           <aside className="sideinfo">
             <div className="small-label">REPLAY CLOCK</div>
             <div className="clock">{blind?'DATE HIDDEN':date}</div>
@@ -180,21 +282,18 @@ export default function App() {
             <div className="note">Blind toggle hides labels only. It is NOT certified blind testing: price patterns may reveal history.</div>
           </aside>
         </div>
+        {showOrders&&session&&<OrderPanel orders={orders} busy={busy} session={session}
+          onPlace={placeOrder} onManage={manageOrder} activePosition={activePosition?.id}
+          onSelect={setSelectedPosition} shortcut={tradeShortcut}/>}
         <div className="playback">
           <span>REPLAY</span>
           <button disabled={busy||!session} onClick={()=>step(-1)}>◀ −1</button>
           <button className="accent" disabled={busy||!session} onClick={()=>step(1)}>+1 ▶</button>
           <button disabled={busy||!session} onClick={()=>step(10)}>+10</button>
           <button disabled={busy||!session} onClick={()=>step(60)}>+60</button>
-          <span className="muted">Step unit = one 1m bar · Current TF = {tf}</span>
+          <span className="muted">Step unit = one {baseTf(session?.base_ms)} bar · Current TF = {tf}</span>
         </div>
       </section>
-      <section className="bottom-grid">
-        <article className="panel"><div className="small-label">CAUSALITY GUARANTEE</div><h3>Visible candles only</h3><p>All OHLCV aggregation stops at the replay cursor. An unfinished 1D/4H/1W candle is marked partial internally and cannot include future 1m prices.</p></article>
-        <article className="panel"><div className="small-label">DRAWING STORAGE</div><h3>Price-anchored lines</h3><p>Enable <strong>+ S/R line</strong>, then click the chart. Price and creation cursor are persisted in SQLite. Trendline anchors/assessment come later.</p></article>
-        <article className="panel"><div className="small-label">NEXT MILESTONE</div><h3>Execution simulator</h3><p>Market/limit orders, stop-loss, TP, realistic fees, ambiguous intrabar handling, journal and verified statistics are pending.</p></article>
-      </section>
     </main>
-    <footer>Prototype only · Not financial advice · No live orders · GitHub: Zedd443/crypto-replay-lab</footer>
   </div>;
 }

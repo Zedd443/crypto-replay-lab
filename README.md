@@ -41,6 +41,17 @@ Tests:
 python -m pytest backend/tests -q
 ```
 
+## Replay local Parquet
+
+The Data / import panel lists files named `<SYMBOL>_15m.parquet` in `raw/`.
+Select a dataset and click **New replay**. A fresh browser session opens BTCUSDT
+when its file is available. The first replay for a symbol copies its candles
+into SQLite for reuse. Source files are read-only.
+
+Each step advances one 15m candle. Only timeframes from 15m to 1w are available
+for this source, and larger bars use only closed 15m candles. Binance CSV/ZIP
+imports and the synthetic demo still use 1m as their base interval.
+
 ## Import real futures data
 
 Download Binance **USDT-M futures, 1m kline** CSV/ZIP from https://data.binance.vision/ (not spot data). In the Data panel choose your file and label the symbol, e.g. BTCUSDT. The 1m parser expects Binance kline columns: `open_time, open, high, low, close, volume, ...`.
@@ -52,8 +63,31 @@ The synthetic dataset is explicitly marked DEMO, **not** historical BTC. It must
 - Backend runs localhost-only. **Do not** expose this API through a public tunnel without adding authentication, HTTPS and request protection.
 - `data/` and SQLite files are ignored by Git.
 
+## Simulated orders and indicators
+
+Open **Trade**, enter a quantity and TP/SL percentages, and choose **Long**
+or **Short**. Paper entries and manual exits use the price visible at the
+replay cursor. Drag the TP/SL labels in the chart to move the bracket.
+Automatic exits first check subsequent base candles. A gap at the open fills
+at that open. When both levels are touched intrabar, the stop takes precedence
+because candle data cannot identify the order of touches. Earlier next-open
+orders keep their stored execution mode. P&L is gross.
+
+The **Indicators** menu contains SMA, EMA, Bollinger Bands, Donchian, VWMA, RSI,
+ATR, MACD, ADX, OBV, Stochastic, SMC Break of Structure, and ICT Fair Value Gap.
+Price overlays can be combined. One oscillator is shown in a lower pane.
+BOS marks a close through a confirmed two-bars-per-side swing. FVG marks
+three-candle price separation on the third closed candle. These two markers
+apply local rules inspired by community scripts. Numeric indicators can update
+with the visible partial higher-timeframe candle.
+
+References include [TradingView technical indicators](https://www.tradingview.com/support/solutions/43000614331-technical-ratings/),
+[TA-Lib on GitHub](https://github.com/TA-Lib/ta-lib),
+[Research article on intraday Bitcoin price shocks](https://doi.org/10.1080/15140326.2022.2151253),
+and [LuxAlgo's SMC community indicator](https://www.tradingview.com/script/CnB3fSph-Smart-Money-Concepts-SMC-LuxAlgo/).
+
 ## Current limitations
-No futures order execution, funding, OI, CVD, free-form trendline, indicator scripting, or statistical strategy evaluation yet. Those modules have interfaces planned in docs/ROADMAP.md. Historical L2 execution cannot be inferred from OHLCV.
+Simulated execution supports market orders with gross P&L. Fees, slippage, liquidation, funding, OI, CVD, indicator scripting, and statistical strategy evaluation remain future work. Those modules have interfaces planned in docs/ROADMAP.md. Historical L2 execution cannot be inferred from OHLCV.
 
 ## License
 MIT (code in this repository only; third-party data retain their respective terms).

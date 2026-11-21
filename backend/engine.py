@@ -28,16 +28,18 @@ def bucket_start(timestamp_ms: int, timeframe: str) -> int:
     return timestamp_ms // span * span
 
 
-def aggregate(visible_candles: list[dict], timeframe: str, replay_cutoff_ms: int) -> list[dict]:
-    """Aggregate *visible* closed 1m candles. Current HTF candle is partial."""
+def aggregate(visible_candles: list[dict], timeframe: str, replay_cutoff_ms: int,
+              base_ms: int = MINUTE_MS) -> list[dict]:
+    """Aggregate *visible* closed base candles. Current HTF candle is partial."""
     if timeframe not in TF_MS:
         raise ValueError("unsupported timeframe")
+    if TF_MS[timeframe] < base_ms or TF_MS[timeframe] % base_ms:
+        raise ValueError("unsupported timeframe for dataset interval")
     acc: list[dict] = []
     current = None
     for row in visible_candles:
         ts = int(row["ts"])
-        # One-minute bars open at ts, close at ts+60s.
-        if ts + MINUTE_MS > replay_cutoff_ms:
+        if ts + base_ms > replay_cutoff_ms:
             raise ValueError("future candle leak attempted")
         key = bucket_start(ts, timeframe)
         if current is None or current["time"] != key:
@@ -82,17 +84,18 @@ def synthetic_candles(count: int = 30_240) -> list[dict]:
     return out
 
 
-def validate_and_normalize(rows: list[dict]) -> tuple[list[dict], int]:
+def validate_and_normalize(rows: list[dict], base_ms: int = MINUTE_MS,
+                           *, minimum: int = 2) -> tuple[list[dict], int]:
     """Validate schema, ordering and prices. Return validated rows and gap count."""
-    if len(rows) < 2:
-        raise ValueError("at least two 1m candles required")
+    if len(rows) < minimum:
+        raise ValueError(f"at least {minimum} candles required")
     normalized: list[dict] = []
     gaps = 0
     last = None
     for row in rows:
         ts = int(row["ts"])
-        if ts % MINUTE_MS:
-            raise ValueError("1m candle timestamp must align to UTC minute")
+        if ts % base_ms:
+            raise ValueError("candle timestamp must align to the UTC dataset interval")
         values = [float(row[k]) for k in ("open", "high", "low", "close", "volume")]
         o, h, l, close, v = values
         if not all(math.isfinite(x) for x in values) or min(o, h, l, close) <= 0 or v < 0:
@@ -102,8 +105,8 @@ def validate_and_normalize(rows: list[dict]) -> tuple[list[dict], int]:
         if last is not None:
             if ts <= last:
                 raise ValueError("timestamp must be strictly increasing")
-            if ts - last > MINUTE_MS:
-                gaps += (ts - last) // MINUTE_MS - 1
+            if ts - last > base_ms:
+                gaps += (ts - last) // base_ms - 1
         last = ts
         normalized.append({"ts":ts,"open":o,"high":h,"low":l,"close":close,"volume":v})
     return normalized, gaps

@@ -1,7 +1,11 @@
 import React, { useEffect, useRef } from 'react';
-import { createChart, CandlestickSeries, HistogramSeries, CrosshairMode } from 'lightweight-charts';
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries, CrosshairMode, createSeriesMarkers } from 'lightweight-charts';
+import BracketOverlay from './BracketOverlay.jsx';
+import DrawingTools, {DRAWING_TOOLS} from './DrawingTools.jsx';
+import ShapeOverlay from './ShapeOverlay.jsx';
+import {calculateIndicator, INDICATORS} from './indicators.js';
 
-export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, resetSignal, fitSignal }) {
+export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut }) {
   const rootRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -9,12 +13,42 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const drawingModeRef = useRef(drawingMode);
   const onNewLineRef = useRef(onNewLine);
   const chartLinesRef = useRef([]);
-  const tfRef = useRef(timeframe);
-  const sidRef = useRef(sessionId);
+  const trendlinesRef = useRef([]);
+  const indicatorSeries = useRef(new Map());
+  const indicatorMarkers = useRef(null);
+  const [indicatorMenu,setIndicatorMenu] = React.useState(false);
+  const [enabled,setEnabled] = React.useState([]);
+  const activeIndicators=React.useMemo(()=>INDICATORS.filter(([id])=>enabled.includes(id))
+    .map(([id,label,kind])=>({id,label,kind,...calculateIndicator(id,candles)})),[enabled,candles]);
+  const toggleIndicator=(id,kind)=>setEnabled(previous=>{
+    if(previous.includes(id))return previous.filter(value=>value!==id);
+    const paneIds=INDICATORS.filter(entry=>entry[2]==='pane').map(entry=>entry[0]);
+    return [...previous.filter(value=>kind!=='pane'||!paneIds.includes(value)),id];
+  });
+  const firstAnchor = useRef(null);
+  const busyRef = useRef(busy);
+  const [awaitingEnd,setAwaitingEnd] = React.useState(false);
+  const [drawingListOpen,setDrawingListOpen] = React.useState(false);
+  const [toolMenu,setToolMenu] = React.useState(false);
+  const hasOpenPosition=paperPosition?.status==='open';
+  const shapes=React.useMemo(()=>drawings.filter(d=>d.timeframe===timeframe &&
+    ['horizontal_ray','vertical','rectangle'].includes(d.kind)),[drawings,timeframe]);
+  const showToolMenu=open=>{
+    setToolMenu(open);
+    if(open){setDrawingListOpen(false);setIndicatorMenu(false);}
+  };
+  const [selectedDrawing,setSelectedDrawing] = React.useState(null);
+  busyRef.current = busy;
+  const resetAnchor = () => {
+    firstAnchor.current = null;
+    setAwaitingEnd(false);
+  };
+
+  useEffect(() => {
+    resetAnchor();
+  }, [drawingMode, timeframe, sessionId, candles]);
   drawingModeRef.current = drawingMode;
   onNewLineRef.current = onNewLine;
-  tfRef.current = timeframe;
-  sidRef.current = sessionId;
 
   useEffect(() => {
     if (!rootRef.current) return;
@@ -42,15 +76,56 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     chartRef.current=chart;
     candleSeriesRef.current=series;
     volumeSeriesRef.current=volume;
-    const onClick=(param) => {
-      if (!drawingModeRef.current || !param.point) return;
-      const price=series.coordinateToPrice(param.point.y);
-      if (price != null && Number.isFinite(price) && price>0) onNewLineRef.current?.(price);
+    indicatorMarkers.current=createSeriesMarkers(series,[]);
+    const pane=chart.panes()[0].getHTMLElement();
+    let pointerStart=null;
+    const onPointerDown=(event)=>{
+      pointerStart={x:event.clientX,y:event.clientY};
     };
-    chart.subscribeClick(onClick);
+    const onClick=(event) => {
+      if (busyRef.current || !drawingModeRef.current || !pointerStart ||
+          Math.hypot(event.clientX-pointerStart.x,event.clientY-pointerStart.y)>5) return;
+      const bounds=pane.getBoundingClientRect();
+      const scale=chart.timeScale();
+      const x=event.clientX-bounds.left-chart.priceScale('left').width();
+      const y=event.clientY-bounds.top;
+      if(x<0 || x>=scale.width() || y<0 || y>=bounds.height)return;
+      const time=scale.coordinateToTime(x);
+      if(typeof time!=='number')return;
+      const price=series.coordinateToPrice(y);
+      if (price == null || !Number.isFinite(price) || price<=0) return;
+      if (drawingModeRef.current === 'horizontal') {
+        onNewLineRef.current({kind:'horizontal',price});
+        return;
+      }
+      const anchor = {time:time*1000,price};
+      const kind=drawingModeRef.current;
+      if(kind==='horizontal_ray'||kind==='vertical'){
+        onNewLineRef.current({kind,price,anchor_start:anchor.time});
+        return;
+      }
+      if (!firstAnchor.current) {
+        firstAnchor.current = anchor;
+        setAwaitingEnd(true);
+        return;
+      }
+      if (firstAnchor.current.time === anchor.time) return;
+      const [start,end] = [firstAnchor.current,anchor].sort((a,b)=>a.time-b.time);
+      resetAnchor();
+      onNewLineRef.current({kind,price:start.price,end_price:end.price,
+        anchor_start:start.time,anchor_end:end.time});
+    };
+    pane?.addEventListener('pointerdown',onPointerDown);
+    pane?.addEventListener('click',onClick);
     return () => {
-      chart.unsubscribeClick(onClick);
+      pane?.removeEventListener('pointerdown',onPointerDown);
+      pane?.removeEventListener('click',onClick);
+      indicatorMarkers.current?.detach();
+      indicatorMarkers.current=null;
+      indicatorSeries.current.clear();
       chart.remove();
+      chartLinesRef.current=[];
+      trendlinesRef.current=[];
       chartRef.current=null;
       candleSeriesRef.current=null;
       volumeSeriesRef.current=null;
@@ -70,49 +145,135 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       time:c.time/1000, value:c.volume,
       color:c.close>=c.open?'#286c61':'#784448'
     })));
-    // A viewport is saved per session+timeframe, so switching timeframe restores its last view.
-    const key=`crl-viewport:${sessionId}:${timeframe}`;
-    let saved=null;
-    try { saved=JSON.parse(localStorage.getItem(key)||'null'); } catch { /* ignore invalid values */ }
-    if (saved && Number.isFinite(saved.from) && Number.isFinite(saved.to)) {
-      chart.timeScale().setVisibleLogicalRange(saved);
-    } else {
-      chart.timeScale().fitContent();
-    }
-  }, [candles,timeframe,sessionId]);
+    showRecent(chart, candles.length,hasOpenPosition);
 
-  useEffect(() => {
-    const chart=chartRef.current;
-    if (!chart || !sessionId) return;
-    const handler = (range) => {
-      if (range && Number.isFinite(range.from) && Number.isFinite(range.to)) {
-        localStorage.setItem(`crl-viewport:${sidRef.current}:${tfRef.current}`,JSON.stringify(range));
-      }
-    };
-    chart.timeScale().subscribeVisibleLogicalRangeChange(handler);
-    return () => chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
-  }, [sessionId]);
+  }, [candles,timeframe,sessionId,hasOpenPosition]);
 
   useEffect(() => {
     const series=candleSeriesRef.current;
     if (!series) return;
     for (const pl of chartLinesRef.current) series.removePriceLine(pl);
-    chartLinesRef.current=(drawings||[]).map(d=>series.createPriceLine({
-      price:d.price, color:'#F0C266',lineWidth:2,lineStyle:2,
+    chartLinesRef.current=drawings.filter(d=>d.kind==='horizontal').map(d=>series.createPriceLine({
+      price:d.price, color:d.id===selectedDrawing?'#8BE1FF':'#F0C266',lineWidth:2,lineStyle:2,
       axisLabelVisible:true,title:'User S/R'
     }));
-  }, [drawings]);
+    const chart=chartRef.current;
+    for (const line of trendlinesRef.current) chart.removeSeries(line);
+    const times = new Set(candles.map(c=>c.time));
+    trendlinesRef.current=drawings.filter(d=>d.kind==='trendline' && d.timeframe===timeframe &&
+      times.has(d.anchor_start) && times.has(d.anchor_end)).map(d=>{
+      const line=chart.addSeries(LineSeries,{color:d.id===selectedDrawing?'#8BE1FF':'#F0C266',lineWidth:2,
+        priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
+        autoscaleInfoProvider:()=>null});
+      line.setData([{time:d.anchor_start/1000,value:d.price},{time:d.anchor_end/1000,value:d.end_price}]);
+      return line;
+    });
+  }, [drawings,candles,timeframe,selectedDrawing]);
 
-  useEffect(() => {
-    if (fitSignal>0) chartRef.current?.timeScale().fitContent();
-  }, [fitSignal]);
+  useEffect(()=>{
+    const chart=chartRef.current;
+    if(!chart)return;
+    const next=new Set(activeIndicators.flatMap(item=>(item.series||[]).map(line=>item.id+line.label)));
+    for(const [key,series] of indicatorSeries.current){
+      if(!next.has(key)){
+        chart.removeSeries(series);
+        indicatorSeries.current.delete(key);
+      }
+    }
+    for(const indicator of activeIndicators){
+      for(const line of indicator.series||[]){
+        const key=indicator.id+line.label;
+        let series=indicatorSeries.current.get(key);
+        if(!series){
+          series=chart.addSeries(line.kind==='histogram'?HistogramSeries:LineSeries,{
+            color:line.color,lineWidth:1,title:line.label,priceLineVisible:false,
+            lastValueVisible:true,crosshairMarkerVisible:false,
+          },indicator.kind==='pane'?1:0);
+          indicatorSeries.current.set(key,series);
+        }
+        series.setData(line.points);
+      }
+    }
+    const markers=activeIndicators.flatMap(item=>item.markers||[]).sort((a,b)=>a.time-b.time);
+    indicatorMarkers.current?.setMarkers(markers);
+  },[activeIndicators]);
 
-  useEffect(() => {
-    if (resetSignal<=0 || !chartRef.current) return;
-    localStorage.removeItem(`crl-viewport:${sessionId}:${timeframe}`);
-    chartRef.current.priceScale('right').applyOptions({autoScale:true});
-    chartRef.current.timeScale().fitContent();
-  }, [resetSignal]);
+  useEffect(()=>{
+    const series=candleSeriesRef.current;
+    series?.applyOptions({autoscaleInfoProvider:original=>{
+      const scale=original();
+      if(!scale?.priceRange || !paperPosition)return scale;
+      const {entry_price,take_profit,stop_loss}=paperPosition;
+      return {...scale,priceRange:{
+        minValue:Math.min(scale.priceRange.minValue,entry_price,take_profit,stop_loss),
+        maxValue:Math.max(scale.priceRange.maxValue,entry_price,take_profit,stop_loss),
+      }};
+    }});
+  },[paperPosition]);
 
-  return <div ref={rootRef} className="chart-area" aria-label="Interactive replay candlestick chart" />;
+  const reset=()=>{
+    const chart=chartRef.current;
+    if(!chart)return;
+    chart.priceScale('right').applyOptions({autoScale:true});
+    showRecent(chart,candles.length,hasOpenPosition);
+  };
+
+  return <div className="chart-frame">
+    <div ref={rootRef} className="chart-area" aria-label="Interactive replay candlestick chart" />
+    {paperPosition&&<BracketOverlay key={paperPosition.id} position={paperPosition} chart={chartRef}
+      series={candleSeriesRef} candles={candles} disabled={positionLocked||paperPosition.status!=='open'}
+      onAdjust={onAdjustPosition}/>}
+    {shapes.length>0&&<ShapeOverlay chart={chartRef} series={candleSeriesRef} drawings={shapes} selected={selectedDrawing}/>}
+    <DrawingTools open={toolMenu} onOpen={showToolMenu} mode={drawingMode}
+      disabled={busy||!sessionId} onSelect={onDrawingMode} onTrade={onTradeShortcut}/>
+    <div className="chart-drawing-tools" aria-label="Chart options">
+      <button aria-expanded={drawingListOpen} aria-controls="chart-drawing-list"
+        disabled={!sessionId} onClick={()=>{setDrawingListOpen(open=>!open);setIndicatorMenu(false);setToolMenu(false);}}>
+        Drawings ({drawings.length})
+      </button>
+      <button aria-expanded={indicatorMenu} aria-controls="chart-indicators"
+        onClick={()=>{setIndicatorMenu(open=>!open);setDrawingListOpen(false);setToolMenu(false);}}>Indicators ({enabled.length})</button>
+      {indicatorMenu&&<section id="chart-indicators" className="chart-drawing-list indicator-list" aria-label="Indicators">
+        {INDICATORS.map(([id,label,kind])=><label key={id}>
+          <input type="checkbox" checked={enabled.includes(id)} onChange={()=>toggleIndicator(id,kind)}/>
+          {label}
+        </label>)}
+        <p>One lower-pane indicator at a time.</p>
+      </section>}
+      {awaitingEnd&&<span role="status">Pick second point</span>}
+      {drawingListOpen&&<section id="chart-drawing-list" className="chart-drawing-list" aria-label="Saved drawings">
+        {drawings.length===0?<p>No drawings at this cursor</p>:<>
+          <ul>{drawings.map(d=>{
+            const label=(DRAWING_TOOLS.find(tool=>tool.id===d.kind)?.label||d.kind)+' '+d.timeframe+' / '+d.price.toLocaleString();
+            return <li key={d.id}>
+              <button aria-pressed={selectedDrawing===d.id}
+                onClick={()=>setSelectedDrawing(selectedDrawing===d.id?null:d.id)}>{label}</button>
+              <button aria-label={'Delete '+label} disabled={busy}
+                onClick={()=>onRemoveDrawing(d.id)}>Delete</button>
+            </li>;
+          })}</ul>
+          <button className="clear-drawings" disabled={busy}
+            onClick={()=>{if(window.confirm('Clear all drawings at this replay cursor?'))onRemoveDrawing();}}>
+            Clear drawings
+          </button>
+        </>}
+      </section>}
+    </div>
+    <div className="chart-view-tools">
+      <button onClick={()=>chartRef.current?.timeScale().fitContent()}>Fit</button>
+      <button onClick={reset}>Reset</button>
+      <button aria-pressed={fullscreen} onClick={onToggleFullscreen}>
+        {fullscreen?'Exit fullscreen':'Fullscreen'}
+      </button>
+    </div>
+  </div>;
+}
+
+function showRecent(chart,count,padPosition) {
+  if(count<=200&&!padPosition){
+    chart.timeScale().fitContent();
+    return;
+  }
+  const padding=padPosition?Math.min(18,Math.max(3,Math.ceil(count*0.09))):0;
+  chart.timeScale().setVisibleLogicalRange({from:Math.max(0,count-200),to:count-1+padding});
 }

@@ -79,9 +79,9 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
       next.anchor_start=time(x1+dx);next.anchor_end=time(x2+dx);
       next.price=price(y1+dy);next.end_price=price(y2+dy);
       if(isPosition(d.kind))next.take_profit=price(yt+dy);
-    }else if(part==='nw'){
+    }else if(part==='start'){
       next.anchor_start=time(x1+dx);next.price=price(y1+dy);
-    }else if(part==='se'){
+    }else if(part==='end'){
       next.anchor_end=time(x2+dx);next.end_price=price(y2+dy);
     }else if(part==='entry')next.price=price(y1+dy);
     else if(part==='stop')next.end_price=price(y2+dy);
@@ -136,8 +136,10 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
               (d.kind==='long_position'?'LONG':'SHORT')+' PLAN · R:R '+(risk?reward/risk:0).toFixed(2):
               part==='stop'?'SL':'TP'}</div>)}
         </>}
-        {edit&&!direction&&<><span className="shape-handle nw" data-handle="nw"/>
-          <span className="shape-handle se" data-handle="se"/></>}
+        {edit&&!direction&&<>
+          <span className={'shape-handle start '+(d.price>=d.end_price?'top':'bottom')} data-handle="start"/>
+          <span className={'shape-handle end '+(d.price>=d.end_price?'bottom':'top')} data-handle="end"/>
+        </>}
       </div>;
     })}
   </div>;

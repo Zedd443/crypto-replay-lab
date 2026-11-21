@@ -87,9 +87,13 @@
 .chart-shape.editable:active{cursor:grabbing}
 .chart-shape.draft{opacity:.7}
 .chart-shape .shape-handle{position:absolute;width:11px;height:11px;border:2px solid #0b1422;
-  background:#8be1ff;border-radius:3px;pointer-events:auto;cursor:nwse-resize}
-.shape-handle.nw{left:-6px;top:-6px}
-.shape-handle.se{right:-6px;bottom:-6px}
+  background:#8be1ff;border-radius:3px;pointer-events:auto}
+.shape-handle.start{left:-6px}
+.shape-handle.end{right:-6px}
+.shape-handle.top{top:-6px}
+.shape-handle.bottom{bottom:-6px}
+.shape-handle.start.top,.shape-handle.end.bottom{cursor:nwse-resize}
+.shape-handle.start.bottom,.shape-handle.end.top{cursor:nesw-resize}
 .chart-shape-long_position,.chart-shape-short_position{background:transparent;border:1px dashed #8cb2e2}
 .chart-shape .plan-reward,.chart-shape .plan-risk{position:absolute;left:0;width:100%;pointer-events:none}
 .chart-shape .plan-reward{background:#42b89136;border:1px solid #68e0b34d}

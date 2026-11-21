@@ -7,7 +7,7 @@ import {calculateIndicator, INDICATORS, INDICATOR_SETTINGS, DEFAULT_INDICATOR_OP
 import {FIB_LEVELS} from './research.js';
 
 export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, onUpdateDrawing, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut,
-  selectedDrawing, onSelectDrawing, orders=[] }) {
+  selectedDrawing, onSelectDrawing, orders=[], onSignalSelection }) {
   const rootRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -33,6 +33,10 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const [drawingColor,setDrawingColor]=React.useState(()=>{
     try{return localStorage.getItem('crl-drawing-color')||'#f0c266';}catch{return '#f0c266';}
   });
+  React.useEffect(()=>{
+    const marker=INDICATORS.find(([id,,kind])=>kind==='marker'&&enabled.includes(id));
+    if(marker)onSignalSelection?.({id:marker[0],parameters:parameters[marker[0]]});
+  },[enabled,parameters,onSignalSelection]);
   const activeIndicators=React.useMemo(()=>INDICATORS.filter(([id])=>enabled.includes(id))
     .map(([id,label,kind])=>({id,label,kind,...calculateIndicator(id,candles,parameters[id])})),
     [enabled,candles,parameters]);

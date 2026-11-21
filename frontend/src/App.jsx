@@ -21,6 +21,7 @@ export default function App() {
   const [candles,setCandles]=useState([]);
   const [tf,setTf]=useState('1h');
   const [drawings,setDrawings]=useState([]);
+  const [activeSignal,setActiveSignal]=useState(null);
   const [selectedDrawing,setSelectedDrawing]=useState(null);
   const activePlan=drawings.find(d=>d.id===selectedDrawing&&['long_position','short_position'].includes(d.kind));
   const [orders,setOrders]=useState([]);
@@ -289,6 +290,7 @@ export default function App() {
           <ChartPanel candles={candles} timeframe={tf} sessionId={session?.id}
             drawings={drawings} drawingMode={drawingMode} onNewLine={addLine} onUpdateDrawing={updateDrawing} busy={busy}
             selectedDrawing={selectedDrawing} onSelectDrawing={setSelectedDrawing} orders={orders}
+            onSignalSelection={setActiveSignal}
             onDrawingMode={setDrawingMode} onRemoveDrawing={removeDrawing}
             fullscreen={Boolean(fullscreen)} onToggleFullscreen={toggleFullscreen}
             paperPosition={activePosition} onAdjustPosition={adjustPosition}
@@ -328,7 +330,9 @@ export default function App() {
           <button disabled={busy||!session} onClick={()=>step(20)}>+20</button>
           <span className="muted">Step = candle TF aktif ({tf.toUpperCase()})</span>
         </div>
-        <ResearchPanel orders={orders} drawings={drawings} candles={candles} session={session}/>
+        <ResearchPanel orders={orders} drawings={drawings} candles={candles} session={session}
+          timeframe={tf} isDemo={Boolean(datasets.find(d=>d.id===session?.dataset_id)?.is_demo)}
+          activeSignal={activeSignal}/>
       </section>
     </main>
   </div>;

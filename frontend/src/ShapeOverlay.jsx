@@ -194,12 +194,15 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
               part==='stop'?'SL':'TP'}</div>)}
         </>}
         {d.kind==='trendline'&&<span className="trendline-segment" data-handle="move"/>}
-        {d.kind==='ghost_feed'&&<div className="ghost-feed-candles" aria-label="Hypothetical Ghost Feed candles">
+        {d.kind==='ghost_feed'&&<>
+          <span className="ghost-feed-select" title="Select, drag, or press Delete to remove Ghost Feed">GHOST FEED</span>
+          <div className="ghost-feed-candles" aria-label="Hypothetical Ghost Feed candles">
           {Array.from({length:Math.max(2,Math.min(40,Math.round(
             (d.anchor_end-d.anchor_start)/(TF_MILLISECONDS[d.timeframe]||3600000)
           )))},(_,i)=><span key={i} data-ghost-bar="" className="ghost-feed-bar">
             <span className="ghost-feed-body"/></span>)}
-        </div>}
+          </div>
+        </>}
         {d.kind==='fib'&&FIB_LEVELS.map(r=><span key={r} className="fib-level"
           data-fib-ratio={r}>{(r*100).toFixed(1)}%</span>)}
         {edit&&!direction&&<>

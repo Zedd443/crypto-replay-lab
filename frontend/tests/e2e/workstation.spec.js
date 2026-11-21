@@ -187,7 +187,8 @@ test('Ghost Feed is a chart drawing with live preview, editable historical/futur
   expect(ghost.ghost_range).toBe(.6);
   await page.reload();
   await expect(page.locator('.chart-shape-ghost_feed')).toHaveCount(1);
-  await shape.click({position:{x:15,y:15},force:true});
+  await shape.locator('.ghost-feed-select').click();
+  await expect(shape).toHaveClass(/selected/);
   await page.keyboard.press('Delete');
   await expect(page.locator('.chart-shape-ghost_feed')).toHaveCount(0);
 });

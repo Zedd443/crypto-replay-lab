@@ -349,3 +349,9 @@ button.accent:hover:not(:disabled){background:#348cf5}
 .ghost-feed-body{position:absolute;left:-4px;width:8px;min-height:2px;
  border:1px solid #b2daff;background:#479fae85}
 .ghost-feed-body[data-direction="down"]{background:#d7738585}
+
+.ghost-feed-select{position:absolute;left:4px;top:3px;z-index:5;
+ padding:3px 6px;border:1px solid #6fa6cc;border-radius:4px;
+ background:#102e4be0;font-size:9px;letter-spacing:.08em;
+ color:#cae6ff;cursor:grab;pointer-events:auto;white-space:nowrap}
+.chart-shape-ghost_feed.selected .ghost-feed-select{background:#206092;border-color:#9bcfff;color:white}

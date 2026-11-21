@@ -187,7 +187,7 @@ test('Ghost Feed is a chart drawing with live preview, editable historical/futur
   expect(ghost.ghost_range).toBe(.6);
   await page.reload();
   await expect(page.locator('.chart-shape-ghost_feed')).toHaveCount(1);
-  await page.getByRole('button',{name:/Drawings \\(/}).click();
+  await page.getByRole('button',{name:/Drawings/}).click();
   await page.getByRole('button',{name:/Ghost Feed drawing /}).click();
   await expect(shape).toHaveClass(/selected/);
   await page.keyboard.press('Delete');

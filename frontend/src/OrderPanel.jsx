@@ -27,6 +27,16 @@ export default function OrderPanel({orders,busy,session,activePosition,onSelect,
   const profit=valid?Math.abs(target-entry)*size:null;
   const rr=valid?profit/risk:null;
   const marketAligned=valid&&Number.isFinite(markPrice)&&Math.abs(entry/markPrice-1)<=.001;
+  const snapPossible=valid&&Number.isFinite(markPrice)&&markPrice>0&&
+    (stop+markPrice-entry)>0&&(target+markPrice-entry)>0;
+  const snapToMarket=()=>{
+    if(!snapPossible||busy||!frontier)return;
+    const delta=markPrice-entry;
+    onUpdateDrawing(drawing.id,{
+      price:markPrice,end_price:stop+delta,take_profit:target+delta,
+      anchor_start:drawing.anchor_start,anchor_end:drawing.anchor_end
+    });
+  };
   const updateLevel=(key,value)=>{
     if(!drawing||!valid)return;
     const next={...levels,[key]:value};
@@ -57,9 +67,12 @@ export default function OrderPanel({orders,busy,session,activePosition,onSelect,
         <div>Notional at entry <strong>{entry==null?'—':format(entry*size)}</strong></div>
         <div>Current mark <strong>{format(markPrice)}</strong></div>
       </div>
-      {!marketAligned&&<span className="plan-warning">
-        Market order requires drawing entry within 0.1% of replay price. Move the entry to current price first.
-      </span>}
+      {!marketAligned&&<div className="snap-plan">
+        <span className="plan-warning">Entry differs from current replay close.
+          Snap shifts Entry/SL/TP together and preserves your risk/reward distances.</span>
+        <button type="button" disabled={!snapPossible||busy||!frontier}
+          onClick={snapToMarket}>Snap Entry to Market ({format(markPrice)})</button>
+      </div>}
       <button type="button" className={isLong?'long-order':'short-order'}
         disabled={!ready||!marketAligned} onClick={()=>onExecuteDrawing(drawing.id,size)}>
         Execute Paper {isLong?'Long':'Short'}

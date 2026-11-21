@@ -395,12 +395,14 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                     raise ValueError("drawing timeframe is below the dataset interval")
                 clock = snapshot(row)["clock_ms"]
                 start = int(payload["anchor_start"])
-                if not 0 <= start < clock:
+                # Future timestamps are planning canvas coordinates, not observed market data.
+                future_limit = clock + 80 * TF_MS[tf]
+                if not 0 <= start < future_limit:
                     raise ValueError("invalid drawing start")
                 if kind in ("trendline","rectangle","fib","long_position","short_position"):
                     end = int(payload["anchor_end"])
                     end_price = float(payload["end_price"])
-                    if not (start < end < clock and 0 < end_price < 1e12):
+                    if not (start < end < future_limit and 0 < end_price < 1e12):
                         raise ValueError("invalid drawing end")
                 if kind in ("long_position","short_position"):
                     take_profit = float(payload["take_profit"])
@@ -448,7 +450,8 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             price, stop = float(payload["price"]),float(payload["end_price"])
             start, end = int(payload["anchor_start"]),int(payload["anchor_end"])
             clock = snapshot(state)["clock_ms"]
-            if not (0 < price < 1e12 and 0 < stop < 1e12 and 0 <= start < end < clock):
+            future_limit = clock + 80 * TF_MS[existing["timeframe"]]
+            if not (0 < price < 1e12 and 0 < stop < 1e12 and 0 <= start < end < future_limit):
                 raise ValueError("invalid drawing coordinates")
             take_profit = None
             if existing["kind"] in ("long_position","short_position"):

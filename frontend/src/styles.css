@@ -309,3 +309,7 @@ button.accent:hover:not(:disabled){background:#348cf5}
 .plan-hit-dot.hit-tp{background:#20d69f}
 .plan-hit-dot.hit-sl{background:#fa667a}
 .plan-hit-dot.hit-manual{background:#e6bf75}
+
+.snap-plan{grid-column:1/-1;display:flex;flex-direction:column;gap:7px}
+.snap-plan .plan-warning{padding:8px;line-height:1.5}
+.snap-plan>button{padding:10px;background:#174a77;color:#d4eaff;border:1px solid #397ab0;font-size:11px}

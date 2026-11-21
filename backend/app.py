@@ -7,6 +7,7 @@ import csv
 import io
 import os
 import random
+import re
 import sqlite3
 import uuid
 import zipfile
@@ -86,7 +87,8 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             id TEXT PRIMARY KEY, session_id TEXT NOT NULL, kind TEXT NOT NULL,
             timeframe TEXT NOT NULL, price REAL NOT NULL, created_at_cursor INTEGER NOT NULL,
             created_at_ts INTEGER NOT NULL,
-            anchor_start INTEGER, anchor_end INTEGER, end_price REAL, take_profit REAL
+            anchor_start INTEGER, anchor_end INTEGER, end_price REAL, take_profit REAL,
+            color TEXT NOT NULL DEFAULT '#f0c266'
         );
         CREATE TABLE IF NOT EXISTS drawing_edits (
           drawing_id TEXT NOT NULL, cursor INTEGER NOT NULL, price REAL NOT NULL,
@@ -99,7 +101,7 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
         if "base_ms" not in {column["name"] for column in conn.execute("PRAGMA table_info(datasets)")}:
             conn.execute("ALTER TABLE datasets ADD COLUMN base_ms INTEGER NOT NULL DEFAULT 60000")
         drawing_columns = {column["name"] for column in conn.execute("PRAGMA table_info(drawings)")}
-        for name, sql_type in (("anchor_start", "INTEGER"), ("anchor_end", "INTEGER"), ("end_price", "REAL"), ("take_profit", "REAL")):
+        for name, sql_type in (("anchor_start", "INTEGER"), ("anchor_end", "INTEGER"), ("end_price", "REAL"), ("take_profit", "REAL"), ("color", "TEXT NOT NULL DEFAULT '#f0c266'")):
             if name not in drawing_columns:
                 conn.execute(f"ALTER TABLE drawings ADD COLUMN {name} {sql_type}")
         exists = conn.execute("SELECT id FROM datasets WHERE id='synthetic-demo'").fetchone()
@@ -334,7 +336,8 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                    COALESCE(e.anchor_start,d.anchor_start) AS anchor_start,
                    COALESCE(e.anchor_end,d.anchor_end) AS anchor_end,
                    COALESCE(e.end_price,d.end_price) AS end_price,
-                   COALESCE(e.take_profit,d.take_profit) AS take_profit
+                   COALESCE(e.take_profit,d.take_profit) AS take_profit,
+                   d.color AS color
             FROM drawings AS d LEFT JOIN drawing_edits AS e
               ON e.drawing_id=d.id AND e.cursor=(
                 SELECT MAX(cursor) FROM drawing_edits
@@ -378,8 +381,11 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             kind = payload.get("kind","horizontal")
             tf = payload.get("timeframe","1h")
             price = float(payload["price"])
-            if kind not in ("horizontal", "trendline", "horizontal_ray", "vertical", "rectangle", "long_position", "short_position") or tf not in TF_MS or not (0 < price < 1e12):
+            if kind not in ("horizontal", "trendline", "horizontal_ray", "vertical", "rectangle", "fib", "long_position", "short_position") or tf not in TF_MS or not (0 < price < 1e12):
                 raise ValueError("invalid drawing")
+            color = payload.get("color","#f0c266")
+            if not isinstance(color,str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}",color):
+                raise ValueError("invalid color")
             start = end = end_price = take_profit = None
             if kind != "horizontal":
                 if TF_MS[tf] < row["base_ms"]:
@@ -388,7 +394,7 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                 start = int(payload["anchor_start"])
                 if not 0 <= start < clock:
                     raise ValueError("invalid drawing start")
-                if kind in ("trendline","rectangle","long_position","short_position"):
+                if kind in ("trendline","rectangle","fib","long_position","short_position"):
                     end = int(payload["anchor_end"])
                     end_price = float(payload["end_price"])
                     if not (start < end < clock and 0 < end_price < 1e12):
@@ -404,9 +410,9 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                               (row["dataset_id"],row["cursor"])).fetchone()
         drawing_id = str(uuid.uuid4())
         db().execute("""INSERT INTO drawings
-                     (id,session_id,kind,timeframe,price,created_at_cursor,created_at_ts,anchor_start,anchor_end,end_price,take_profit)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                     (drawing_id,session_id,kind,tf,price,row["cursor"],candle["ts"],start,end,end_price,take_profit))
+                     (id,session_id,kind,timeframe,price,created_at_cursor,created_at_ts,anchor_start,anchor_end,end_price,take_profit,color)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     (drawing_id,session_id,kind,tf,price,row["cursor"],candle["ts"],start,end,end_price,take_profit,color))
         db().commit()
         return jsonify({"id":drawing_id,"kind":kind,"timeframe":tf,"price":price,
                         "created_at_cursor":row["cursor"]}),201
@@ -422,12 +428,20 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
         ).fetchone()
         if existing is None:
             return jsonify({"error":"drawing not found at replay cursor"}),404
-        if existing["kind"] not in ("rectangle","long_position","short_position"):
-            return jsonify({"error":"editing this drawing type is not supported"}),400
         if state["cursor"] != state["max_seen_cursor"]:
             return jsonify({"error":"cannot edit a drawing while replay is rewound"}),409
         payload = request.get_json(silent=True) or {}
         try:
+            if "color" in payload:
+                color = payload["color"]
+                if not isinstance(color,str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}",color):
+                    raise ValueError("invalid color")
+                with db():
+                    db().execute("UPDATE drawings SET color=? WHERE id=?",(color,drawing_id))
+            if not any(k in payload for k in ("price","end_price","anchor_start","anchor_end","take_profit")):
+                return jsonify({"id":drawing_id,"updated_at_cursor":state["cursor"]})
+            if existing["kind"] not in ("rectangle","fib","long_position","short_position"):
+                raise ValueError("geometry editing not supported for this drawing")
             price, stop = float(payload["price"]),float(payload["end_price"])
             start, end = int(payload["anchor_start"]),int(payload["anchor_end"])
             clock = snapshot(state)["clock_ms"]

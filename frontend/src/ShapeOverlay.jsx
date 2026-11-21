@@ -1,8 +1,9 @@
 import React, {useEffect,useRef,useState} from 'react';
 import {FIB_LEVELS} from './research.js';
+import {TF_MILLISECONDS} from './ghostScenario.js';
 
 const isPosition = kind => kind === 'long_position' || kind === 'short_position';
-const editable = kind => kind === 'rectangle' || kind === 'fib' || kind==='trendline' || isPosition(kind);
+const editable = kind => ['rectangle','fib','trendline','ghost_feed'].includes(kind) || isPosition(kind);
 
 /** DOM overlay for editable, price/time anchored drawings. No orders are placed by drawings. */
 export default function ShapeOverlay({chart,series,drawings,selected,onSelect,onEdit,draft,disabled,orders=[]}){
@@ -33,7 +34,7 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
           const y2=d.end_price!=null?s.priceToCoordinate(d.end_price):null;
           const tp=isPosition(d.kind)?s.priceToCoordinate(d.take_profit):null;
           const good=x1!=null && (d.kind==='vertical'||y1!=null) &&
-            (!['rectangle','fib','trendline','long_position','short_position'].includes(d.kind)||(x2!=null&&y2!=null)) &&
+            (!['rectangle','fib','trendline','ghost_feed','long_position','short_position'].includes(d.kind)||(x2!=null&&y2!=null)) &&
             (!isPosition(d.kind)||tp!=null);
           el.style.visibility=good?'visible':'hidden';
           if(!good)continue;
@@ -51,6 +52,33 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
               line.style.width=Math.hypot(bx-ax,by-ay)+'px';
               line.style.transform='translate('+ax+'px,'+ay+'px) rotate('+Math.atan2(by-ay,bx-ax)+'rad)';
             }
+          }
+          if(d.kind==='ghost_feed'){
+            const bars=el.querySelectorAll('[data-ghost-bar]');
+            const range=(d.ghost_range??.35)/100*Math.abs(d.price);
+            const variance=(d.ghost_variance??.2)/100*Math.abs(d.price);
+            let previous=d.price;
+            bars.forEach((node,j)=>{
+              const n=bars.length,ratio=(j+1)/n;
+              const target=d.price+(d.end_price-d.price)*ratio;
+              const offset=j===n-1?0:Math.sin((j+1)*2.41)*variance;
+              const close=Math.max(.000000001,target+offset);
+              const open=previous;previous=close;
+              const wick=Math.max(range*.3,Math.abs(close-open)*.15);
+              const high=Math.max(open,close)+wick,low=Math.max(.000000001,Math.min(open,close)-wick);
+              const hi=s.priceToCoordinate(high),lo=s.priceToCoordinate(low);
+              const op=s.priceToCoordinate(open),cl=s.priceToCoordinate(close);
+              if([hi,lo,op,cl].every(Number.isFinite)){
+                const candleX=x1+(x2-x1)*(j+.5)/n-left;
+                node.style.left=candleX+'px';
+                node.style.top=(Math.min(hi,lo)-top)+'px';
+                node.style.height=Math.max(2,Math.abs(hi-lo))+'px';
+                const body=node.firstElementChild;
+                body.style.top=(Math.min(op,cl)-Math.min(hi,lo))+'px';
+                body.style.height=Math.max(2,Math.abs(op-cl))+'px';
+                body.dataset.direction=close>=open?'up':'down';
+              }
+            });
           }
           if(d.kind==='fib'){
             for(const level of el.querySelectorAll('[data-fib-ratio]')){
@@ -166,6 +194,12 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
               part==='stop'?'SL':'TP'}</div>)}
         </>}
         {d.kind==='trendline'&&<span className="trendline-segment" data-handle="move"/>}
+        {d.kind==='ghost_feed'&&<div className="ghost-feed-candles" aria-label="Hypothetical Ghost Feed candles">
+          {Array.from({length:Math.max(2,Math.min(40,Math.round(
+            (d.anchor_end-d.anchor_start)/(TF_MILLISECONDS[d.timeframe]||3600000)
+          )))},(_,i)=><span key={i} data-ghost-bar="" className="ghost-feed-bar">
+            <span className="ghost-feed-body"/></span>)}
+        </div>}
         {d.kind==='fib'&&FIB_LEVELS.map(r=><span key={r} className="fib-level"
           data-fib-ratio={r}>{(r*100).toFixed(1)}%</span>)}
         {edit&&!direction&&<>

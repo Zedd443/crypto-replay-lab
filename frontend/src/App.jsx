@@ -151,7 +151,7 @@ export default function App() {
 
   const step=(amount)=>run(async()=>{
     if(!session)return;
-    await post(`/api/sessions/${session.id}/step`,{amount});
+    await post(`/api/sessions/${session.id}/step`,{amount,timeframe:tf});
     await refreshSession(session.id,tf);
   });
 
@@ -295,11 +295,13 @@ export default function App() {
           onSelect={setSelectedPosition} shortcut={tradeShortcut}/>}
         <div className="playback">
           <span>REPLAY</span>
+          <button disabled={busy||!session} onClick={()=>step(-20)}>−20</button>
+          <button disabled={busy||!session} onClick={()=>step(-10)}>−10</button>
           <button disabled={busy||!session} onClick={()=>step(-1)}>◀ −1</button>
           <button className="accent" disabled={busy||!session} onClick={()=>step(1)}>+1 ▶</button>
           <button disabled={busy||!session} onClick={()=>step(10)}>+10</button>
-          <button disabled={busy||!session} onClick={()=>step(60)}>+60</button>
-          <span className="muted">Step unit = one {baseTf(session?.base_ms)} bar · Current TF = {tf}</span>
+          <button disabled={busy||!session} onClick={()=>step(20)}>+20</button>
+          <span className="muted">Step = candle TF aktif ({tf.toUpperCase()})</span>
         </div>
       </section>
     </main>

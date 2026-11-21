@@ -16,6 +16,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const trendlinesRef = useRef([]);
   const indicatorSeries = useRef(new Map());
   const indicatorMarkers = useRef(null);
+  const displayedRef = useRef({key:null,length:0,last:null});
   const [indicatorMenu,setIndicatorMenu] = React.useState(false);
   const [enabled,setEnabled] = React.useState([]);
   const activeIndicators=React.useMemo(()=>INDICATORS.filter(([id])=>enabled.includes(id))
@@ -200,14 +201,45 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const ohlc=candles.map(c=>({
       time:c.time/1000,open:c.open,high:c.high,low:c.low,close:c.close,
     }));
-    series.setData(ohlc);
-    vol.setData(candles.map(c=>({
-      time:c.time/1000, value:c.volume,
-      color:c.close>=c.open?'#286c61':'#784448'
-    })));
-    showRecent(chart, candles.length,hasOpenPosition);
+    const volumeBars=candles.map(c=>({
+      time:c.time/1000,value:c.volume,color:c.close>=c.open?'#286c61':'#784448'
+    }));
+    const key=sessionId+':'+timeframe, prev=displayedRef.current;
+    const scale=chart.timeScale(), visible=scale.getVisibleLogicalRange();
+    if(prev.key&&prev.key!==key&&visible)try{
+      localStorage.setItem('crl-view:'+prev.key,JSON.stringify(visible));
+    }catch{/* storage disabled */}
+    const last=ohlc.at(-1)?.time??null;
+    const append=prev.key===key&&prev.length===ohlc.length-1&&prev.last===ohlc.at(-2)?.time;
+    const replaceLast=prev.key===key&&prev.length===ohlc.length&&prev.last===last;
+    displayedRef.current={key,length:ohlc.length,last};
+    if((append||replaceLast)&&last!==null){
+      series.update(ohlc.at(-1));vol.update(volumeBars.at(-1));
+    }else{
+      series.setData(ohlc);vol.setData(volumeBars);
+      if(prev.key!==key){
+        let saved=null;
+        try{saved=JSON.parse(localStorage.getItem('crl-view:'+key)||'null');}catch{/* ignore */}
+        if(saved&&Number.isFinite(saved.from)&&Number.isFinite(saved.to)){
+          scale.setVisibleLogicalRange(saved);
+        }else showRecent(chart,candles.length,hasOpenPosition);
+      }else if(visible&&Number.isFinite(visible.from)&&Number.isFinite(visible.to)){
+        scale.setVisibleLogicalRange(visible);
+      }
+    }
+  }, [candles,timeframe,sessionId]);
 
-  }, [candles,timeframe,sessionId,hasOpenPosition]);
+  useEffect(()=>{
+    const scale=chartRef.current?.timeScale();
+    if(!scale)return;
+    const save=range=>{
+      const key=displayedRef.current.key;
+      if(!key||!range||!Number.isFinite(range.from)||!Number.isFinite(range.to))return;
+      try{localStorage.setItem('crl-view:'+key,JSON.stringify(range));}catch{/* ignore */}
+    };
+    scale.subscribeVisibleLogicalRangeChange(save);
+    return()=>scale.unsubscribeVisibleLogicalRangeChange(save);
+  },[]);
 
   useEffect(() => {
     const series=candleSeriesRef.current;

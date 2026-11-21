@@ -12,7 +12,7 @@ import uuid
 import zipfile
 
 from flask import Flask, jsonify, request, g
-from .engine import MINUTE_MS, TF_MS, THREE_DAYS_MS, aggregate, synthetic_candles, validate_and_normalize
+from .engine import MINUTE_MS, TF_MS, THREE_DAYS_MS, bucket_start, aggregate, synthetic_candles, validate_and_normalize
 
 from . import binance_source, brackets, orders, parquet_source
 
@@ -275,7 +275,28 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
         except (TypeError,ValueError):return jsonify({"error":"invalid amount"}),400
         if abs(amount)>1440 or amount==0:return jsonify({"error":"amount must be between -1440 and 1440, excluding 0"}),400
         count = db().execute("SELECT COUNT(*) AS n FROM candles WHERE dataset_id=?",(row["dataset_id"],)).fetchone()["n"]
-        cursor = max(0,min(count-1,row["cursor"]+amount))
+        tf = payload.get("timeframe")
+        if tf is None:
+            cursor = max(0,min(count-1,row["cursor"]+amount))
+        else:
+            if tf not in TF_MS or TF_MS[tf]<row["base_ms"] or TF_MS[tf]%row["base_ms"]:
+                return jsonify({"error":"invalid active timeframe"}),400
+            current=db().execute("SELECT ts FROM candles WHERE dataset_id=? AND seq=?",
+                                 (row["dataset_id"],row["cursor"])).fetchone()
+            clock=current["ts"]+row["base_ms"]
+            span=TF_MS[tf]
+            if amount>0:
+                target=bucket_start(clock,tf)+amount*span
+                nextbar=db().execute(
+                    "SELECT seq FROM candles WHERE dataset_id=? AND ts+?<=? ORDER BY seq DESC LIMIT 1",
+                    (row["dataset_id"],row["base_ms"],target)).fetchone()
+                cursor=min(count-1,max(row["cursor"]+1,nextbar["seq"] if nextbar else row["cursor"]+1))
+            else:
+                target=bucket_start(clock-1,tf)+(amount+1)*span
+                prevbar=db().execute(
+                    "SELECT seq FROM candles WHERE dataset_id=? AND ts+?<=? ORDER BY seq DESC LIMIT 1",
+                    (row["dataset_id"],row["base_ms"],target)).fetchone()
+                cursor=max(0,min(row["cursor"]-1,prevbar["seq"] if prevbar else 0))
         max_seen = max(row["max_seen_cursor"],cursor)
         contaminated = int(bool(row["contaminated"]) or cursor < row["max_seen_cursor"])
         db().execute("UPDATE sessions SET cursor=?,max_seen_cursor=?,contaminated=? WHERE id=?",

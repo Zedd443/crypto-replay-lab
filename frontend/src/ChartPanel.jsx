@@ -17,7 +17,9 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const chartLinesRef = useRef([]);
   const drawingPriceLabelsRef = useRef([]);
   const candlesRef=useRef(candles);
+  const timeframeRef=useRef(timeframe);
   candlesRef.current=candles;
+  timeframeRef.current=timeframe;
   const trendlinesRef = useRef([]);
   const indicatorSeries = useRef(new Map());
   const indicatorMarkers = useRef(null);
@@ -480,7 +482,9 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       {draftShape?.kind&&<span className="draft-measure" role="status">
         {Math.abs(draftShape.end_price-draftShape.price).toFixed(3)} Δ ·
         {(100*(draftShape.end_price/draftShape.price-1)).toFixed(2)}% ·
-        {Math.abs(draftShape.anchor_end-draftShape.anchor_start)/60000} min
+        {Math.max(1,Math.round(Math.abs(draftShape.anchor_end-draftShape.anchor_start)/
+          ({'1m':60000,'5m':300000,'15m':900000,'30m':1800000,'1h':3600000,
+            '4h':14400000,'1d':86400000,'1w':604800000}[timeframe]||3600000)))} bars
       </span>}
       {['rectangle','fib','long_position','short_position'].includes(drawingMode)&&
         <span role="status">Drag to draw · tap to place Long/Short · Esc to cancel</span>}

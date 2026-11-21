@@ -88,7 +88,8 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             timeframe TEXT NOT NULL, price REAL NOT NULL, created_at_cursor INTEGER NOT NULL,
             created_at_ts INTEGER NOT NULL,
             anchor_start INTEGER, anchor_end INTEGER, end_price REAL, take_profit REAL,
-            color TEXT NOT NULL DEFAULT '#f0c266'
+            color TEXT NOT NULL DEFAULT '#f0c266',
+            ghost_range REAL NOT NULL DEFAULT 0.35, ghost_variance REAL NOT NULL DEFAULT 0.2
         );
         CREATE TABLE IF NOT EXISTS drawing_edits (
           drawing_id TEXT NOT NULL, cursor INTEGER NOT NULL, price REAL NOT NULL,
@@ -104,7 +105,7 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
         if "base_ms" not in {column["name"] for column in conn.execute("PRAGMA table_info(datasets)")}:
             conn.execute("ALTER TABLE datasets ADD COLUMN base_ms INTEGER NOT NULL DEFAULT 60000")
         drawing_columns = {column["name"] for column in conn.execute("PRAGMA table_info(drawings)")}
-        for name, sql_type in (("anchor_start", "INTEGER"), ("anchor_end", "INTEGER"), ("end_price", "REAL"), ("take_profit", "REAL"), ("color", "TEXT NOT NULL DEFAULT '#f0c266'")):
+        for name, sql_type in (("anchor_start", "INTEGER"), ("anchor_end", "INTEGER"), ("end_price", "REAL"), ("take_profit", "REAL"), ("color", "TEXT NOT NULL DEFAULT '#f0c266'"), ("ghost_range","REAL NOT NULL DEFAULT 0.35"), ("ghost_variance","REAL NOT NULL DEFAULT 0.2")):
             if name not in drawing_columns:
                 conn.execute(f"ALTER TABLE drawings ADD COLUMN {name} {sql_type}")
         exists = conn.execute("SELECT id FROM datasets WHERE id='synthetic-demo'").fetchone()
@@ -340,7 +341,8 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                    COALESCE(e.anchor_end,d.anchor_end) AS anchor_end,
                    COALESCE(e.end_price,d.end_price) AS end_price,
                    COALESCE(e.take_profit,d.take_profit) AS take_profit,
-                   d.color AS color
+                   d.color AS color, d.ghost_range AS ghost_range,
+                   d.ghost_variance AS ghost_variance
             FROM drawings AS d LEFT JOIN drawing_edits AS e
               ON e.drawing_id=d.id AND e.cursor=(
                 SELECT MAX(cursor) FROM drawing_edits
@@ -384,11 +386,15 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             kind = payload.get("kind","horizontal")
             tf = payload.get("timeframe","1h")
             price = float(payload["price"])
-            if kind not in ("horizontal", "trendline", "horizontal_ray", "vertical", "rectangle", "fib", "long_position", "short_position") or tf not in TF_MS or not (0 < price < 1e12):
+            if kind not in ("horizontal", "trendline", "horizontal_ray", "vertical", "rectangle", "fib", "ghost_feed", "long_position", "short_position") or tf not in TF_MS or not (0 < price < 1e12):
                 raise ValueError("invalid drawing")
             color = payload.get("color","#f0c266")
             if not isinstance(color,str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}",color):
                 raise ValueError("invalid color")
+            ghost_range=float(payload.get("ghost_range",0.35))
+            ghost_variance=float(payload.get("ghost_variance",0.2))
+            if not (0.01<=ghost_range<=20 and 0<=ghost_variance<=10):
+                raise ValueError("invalid ghost feed parameters")
             start = end = end_price = take_profit = None
             if kind != "horizontal":
                 if TF_MS[tf] < row["base_ms"]:
@@ -399,7 +405,7 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                 future_limit = clock + 80 * TF_MS[tf]
                 if not 0 <= start < future_limit:
                     raise ValueError("invalid drawing start")
-                if kind in ("trendline","rectangle","fib","long_position","short_position"):
+                if kind in ("trendline","rectangle","fib","ghost_feed","long_position","short_position"):
                     end = int(payload["anchor_end"])
                     end_price = float(payload["end_price"])
                     if not (start < end < future_limit and 0 < end_price < 1e12):
@@ -415,9 +421,9 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                               (row["dataset_id"],row["cursor"])).fetchone()
         drawing_id = str(uuid.uuid4())
         db().execute("""INSERT INTO drawings
-                     (id,session_id,kind,timeframe,price,created_at_cursor,created_at_ts,anchor_start,anchor_end,end_price,take_profit,color)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                     (drawing_id,session_id,kind,tf,price,row["cursor"],candle["ts"],start,end,end_price,take_profit,color))
+                     (id,session_id,kind,timeframe,price,created_at_cursor,created_at_ts,anchor_start,anchor_end,end_price,take_profit,color,ghost_range,ghost_variance)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     (drawing_id,session_id,kind,tf,price,row["cursor"],candle["ts"],start,end,end_price,take_profit,color,ghost_range,ghost_variance))
         db().commit()
         return jsonify({"id":drawing_id,"kind":kind,"timeframe":tf,"price":price,
                         "created_at_cursor":row["cursor"]}),201
@@ -445,7 +451,7 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                     db().execute("UPDATE drawings SET color=? WHERE id=?",(color,drawing_id))
             if not any(k in payload for k in ("price","end_price","anchor_start","anchor_end","take_profit")):
                 return jsonify({"id":drawing_id,"updated_at_cursor":state["cursor"]})
-            if existing["kind"] not in ("trendline","rectangle","fib","long_position","short_position"):
+            if existing["kind"] not in ("trendline","rectangle","fib","ghost_feed","long_position","short_position"):
                 raise ValueError("geometry editing not supported for this drawing")
             price, stop = float(payload["price"]),float(payload["end_price"])
             start, end = int(payload["anchor_start"]),int(payload["anchor_end"])
@@ -459,7 +465,13 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                 valid = (0 < stop < price < take_profit) if existing["kind"] == "long_position" else (0 < take_profit < price < stop)
                 if not valid or not take_profit < 1e12:
                     raise ValueError("invalid long/short price levels")
+            ghost_range=float(payload.get("ghost_range",existing["ghost_range"]))
+            ghost_variance=float(payload.get("ghost_variance",existing["ghost_variance"]))
+            if not (0.01<=ghost_range<=20 and 0<=ghost_variance<=10):
+                raise ValueError("invalid ghost feed parameters")
             with db():
+                db().execute("UPDATE drawings SET ghost_range=?,ghost_variance=? WHERE id=?",
+                             (ghost_range,ghost_variance,drawing_id))
                 db().execute("""INSERT INTO drawing_edits
                     (drawing_id,cursor,price,anchor_start,anchor_end,end_price,take_profit)
                     VALUES (?,?,?,?,?,?,?) ON CONFLICT(drawing_id,cursor) DO UPDATE SET

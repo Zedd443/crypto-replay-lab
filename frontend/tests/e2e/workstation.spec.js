@@ -87,3 +87,67 @@ test('Fibonacci drawing renders multiple retracement levels',async({page})=>{
   await expect(shape).toBeVisible();
   await expect(shape.locator('.fib-level')).toHaveCount(10);
 });
+
+test('click-click drawing shows live preview from the first anchor',async({page})=>{
+  await page.getByRole('button',{name:'Shortcut Rectangle'}).click();
+  const p=await at(page);
+  await page.mouse.click(p.x,p.y);
+  await expect(page.getByText(/Move cursor to preview/)).toBeVisible();
+  await page.mouse.move(p.x+90,p.y+70,{steps:5});
+  await expect(page.locator('.chart-shape-rectangle.draft')).toBeVisible();
+  await page.mouse.click(p.x+90,p.y+70);
+  await expect(page.locator('.chart-shape-rectangle:not(.draft)')).toHaveCount(1);
+});
+test('selected drawings can be removed using Delete keyboard shortcut',async({page})=>{
+  await page.getByRole('button',{name:'Shortcut Rectangle'}).click();
+  const p=await at(page);
+  await page.mouse.move(p.x,p.y);await page.mouse.down();
+  await page.mouse.move(p.x+110,p.y+70,{steps:5});await page.mouse.up();
+  const shape=page.locator('.chart-shape-rectangle');
+  await expect(shape).toHaveCount(1);
+  await page.keyboard.press('Delete');
+  await expect(shape).toHaveCount(0);
+});
+test('trendline previews after first click before being committed',async({page})=>{
+  await page.getByRole('button',{name:'Shortcut Trendline'}).click();
+  const p=await at(page);
+  await page.mouse.click(p.x,p.y);
+  await page.mouse.move(p.x+110,p.y-70,{steps:5});
+  await expect(page.locator('.chart-shape-trendline.draft')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.chart-shape-trendline.draft')).toHaveCount(0);
+});
+test('selected chart plan controls paper order and execution links drawing',async({page})=>{
+  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
+  const base='/api/sessions/'+sid;
+  const state=await (await page.request.get(base)).json();
+  const candles=(await (await page.request.get(base+'/candles?tf=1h')).json()).candles;
+  const last=candles.at(-1),first=candles.at(-3),price=last.close;
+  const drawing={
+    kind:'long_position',timeframe:'1h',price, end_price:price*.99,
+    take_profit:price*1.02,anchor_start:first.time,anchor_end:candles.at(-2).time
+  };
+  const response=await page.request.post(base+'/drawings',{data:drawing});
+  expect(response.status()).toBe(201);
+  const id=(await response.json()).id;
+  await page.reload();
+  await page.getByRole('button',{name:/Drawings \(/}).click();
+  await page.getByRole('button',{name:/long_position/}).first().click();
+  const panel=page.getByRole('form',{name:/Selected chart plan/});
+  await expect(page.getByText('LONG · Selected chart plan')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Execute Paper Long'})).toBeEnabled();
+  await page.getByRole('button',{name:'Execute Paper Long'}).click();
+  await expect.poll(async()=>{
+    const result=await (await page.request.get(base+'/orders')).json();
+    return result.some(o=>o.drawing_id===id&&o.status==='open');
+  }).toBe(true);
+  await expect(page.locator('tr.linked-order')).toHaveCount(1);
+});
+test('signal lab calculates holding-period rows without mock numbers',async({page})=>{
+  await page.getByRole('button',{name:'Signal backtest'}).click();
+  await expect(page.getByLabel('Backtest signal')).toBeVisible();
+  await expect(page.getByText('Holding period comparison')).toBeVisible();
+  await expect(page.locator('.signal-table tbody tr')).toHaveCount(6);
+  await page.getByLabel('Holding period').fill('10');
+  await expect(page.locator('.signal-table tbody tr.active td').first()).toHaveText('10 candles');
+});

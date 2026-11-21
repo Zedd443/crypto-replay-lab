@@ -164,19 +164,32 @@ test('future plotting slots show and persist a drawing beyond latest replay cand
   expect(result.status()).toBe(201);
   const drawingId=(await result.json()).id;
   await page.reload();
-  await page.getByRole('button',{name:/Ghost candles OFF/}).click();
-  await page.getByRole('button',{name:'Show future area'}).click();
+  await page.getByRole('button',{name:'Reset'}).click();
   await expect(page.locator('.chart-shape-rectangle[data-drawing-id="'+drawingId+'"]')).toBeVisible();
   const saved=(await (await page.request.get(base+'/drawings')).json()).find(x=>x.id===drawingId);
   expect(saved.anchor_end).toBeGreaterThan(before.clock_ms);
 });
-test('ghost candle controls create a labeled hypothetical scenario',async({page})=>{
-  await page.getByRole('button',{name:/Ghost candles OFF/}).click();
-  await page.getByLabel('Ghost candle count').fill('6');
-  await page.getByLabel('Ghost projected move percent').fill('-3');
-  await page.getByLabel('Show ghost candles').check();
-  await expect(page.getByText('SCENARIO ONLY · NOT REAL MARKET DATA')).toBeVisible();
-  await expect(page.getByRole('button',{name:/Ghost candles ON/})).toBeVisible();
+test('Ghost Feed is a chart drawing with live preview, editable historical/future anchors',async({page})=>{
+  await page.getByRole('button',{name:'Shortcut Ghost Feed drawing'}).click();
+  await page.getByLabel('Ghost avg range percent').fill('0.6');
+  const p=await at(page);
+  await page.mouse.click(p.x,p.y);
+  await page.mouse.move(p.x+110,p.y-60,{steps:7});
+  await expect(page.locator('.chart-shape-ghost_feed.draft')).toBeVisible();
+  await expect(page.locator('.chart-shape-ghost_feed.draft [data-ghost-bar]').first()).toBeVisible();
+  await page.mouse.click(p.x+110,p.y-60);
+  const shape=page.locator('.chart-shape-ghost_feed:not(.draft)');
+  await expect(shape).toHaveCount(1);
+  await expect(shape.locator('[data-ghost-bar]').first()).toBeVisible();
+  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
+  const saved=(await (await page.request.get('/api/sessions/'+sid+'/drawings')).json());
+  const ghost=saved.find(x=>x.kind==='ghost_feed');
+  expect(ghost.ghost_range).toBe(.6);
+  await page.reload();
+  await expect(page.locator('.chart-shape-ghost_feed')).toHaveCount(1);
+  await shape.click({position:{x:15,y:15},force:true});
+  await page.keyboard.press('Delete');
+  await expect(page.locator('.chart-shape-ghost_feed')).toHaveCount(0);
 });
 test('Snap Entry to Market keeps R:R distances and enables paper execution',async({page})=>{
   const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));

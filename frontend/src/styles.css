@@ -302,3 +302,10 @@ button.accent:hover:not(:disabled){background:#348cf5}
 .chart-shape-trendline .shape-handle{pointer-events:auto}
 .draft-measure{display:inline-block;color:#b4dbff;background:#102c4de0;border:1px solid #31608a;
  padding:5px 8px;border-radius:5px;font-size:11px;white-space:nowrap}
+
+.plan-hit-dot{position:absolute;right:-6px;z-index:6;width:13px;height:13px;
+ border:2px solid #fff;border-radius:50%;transform:translateY(-50%);
+ box-shadow:0 0 0 3px #081723ab;pointer-events:auto}
+.plan-hit-dot.hit-tp{background:#20d69f}
+.plan-hit-dot.hit-sl{background:#fa667a}
+.plan-hit-dot.hit-manual{background:#e6bf75}

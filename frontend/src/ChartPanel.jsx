@@ -452,7 +452,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       series={candleSeriesRef} candles={candles} disabled={positionLocked||paperPosition.status!=='open'}
       onAdjust={onAdjustPosition}/>}
     {(shapes.length>0||draftShape)&&<ShapeOverlay chart={chartRef} series={candleSeriesRef}
-      drawings={shapes} draft={draftShape} selected={selectedDrawing} onSelect={setSelectedDrawing}
+      drawings={shapes} draft={draftShape} selected={selectedDrawing} onSelect={setSelectedDrawing} orders={orders}
       onEdit={onUpdateDrawing} disabled={busy||positionLocked}/>}
     <DrawingTools open={toolMenu} onOpen={showToolMenu} mode={drawingMode}
       disabled={busy||!sessionId} onSelect={onDrawingMode} onTrade={onTradeShortcut}/>

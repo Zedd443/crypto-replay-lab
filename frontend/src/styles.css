@@ -252,3 +252,10 @@ button.accent:hover:not(:disabled){background:#348cf5}
   .pattern-cards{grid-template-columns:1fr}
   .drawing-color-control{top:88px;right:10px}
 }
+
+.structure-readout{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:8px 0 14px}
+.structure-readout>div{border:1px solid #29435e;border-radius:7px;padding:9px 12px;background:#142337}
+.structure-readout small{display:block;color:#7e9fbf;font-size:9px;margin-bottom:6px}
+.structure-readout strong{font-size:13px}
+.chart-shape-fib.selected,.chart-shape-long_position.selected,.chart-shape-short_position.selected{background:transparent}
+@media(max-width:650px){.structure-readout{grid-template-columns:1fr}}

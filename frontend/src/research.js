@@ -1,5 +1,26 @@
 export const FIB_LEVELS=[0,0.236,0.382,0.5,0.618,0.705,0.786,1,1.272,1.618];
 
+export function structureSnapshot(candles=[],pivot=2){
+  // A pivot only exists after the candles to its right have closed.
+  const confirmed=candles.filter(c=>c.complete);
+  const highs=[],lows=[];
+  for(let i=2*pivot;i<confirmed.length;i++){
+    const candidate=confirmed[i-pivot];
+    const around=confirmed.slice(i-2*pivot,i+1).filter(c=>c!==candidate);
+    if(around.every(c=>candidate.high>c.high))highs.push(candidate);
+    if(around.every(c=>candidate.low<c.low))lows.push(candidate);
+  }
+  const h=highs.slice(-2),l=lows.slice(-2);
+  const hi=h.length===2?(h[1].high>h[0].high?'HH':'LH'):null;
+  const lo=l.length===2?(l[1].low>l[0].low?'HL':'LL'):null;
+  const regime=hi==='HH'&&lo==='HL'?'Bullish structure':
+    hi==='LH'&&lo==='LL'?'Bearish structure':
+    hi&&lo?'Mixed / range':'Insufficient pivots';
+  return {high:hi,low:lo,regime,lastHigh:highs.at(-1)?.high,
+    lastLow:lows.at(-1)?.low,highCount:highs.length,lowCount:lows.length,
+    confirmedBars:confirmed.length};
+}
+
 export function evaluateTrades(orders=[]){
   const closed=orders.filter(o=>o.status==='closed'&&Number.isFinite(Number(o.pnl)));
   const realized=[...closed].sort((a,b)=>(a.exit_ms||0)-(b.exit_ms||0));
@@ -29,9 +50,14 @@ export function evaluateTrades(orders=[]){
 
 function zoneReport(d,candles){
   const low=Math.min(d.price,d.end_price),high=Math.max(d.price,d.end_price);
-  let touches=0,rejectAbove=0,rejectBelow=0,breakAbove=0,breakBelow=0;
+  let touches=0,rejectAbove=0,rejectBelow=0,breakAbove=0,breakBelow=0,fakeout=0;
   let previous=null;
-  for(const c of candles){
+  let pendingBreak=null;
+  for(let i=0;i<candles.length;i++){
+    const c=candles[i];
+    if(pendingBreak && i-pendingBreak.index<=3 &&
+      c.close>=low&&c.close<=high){fakeout++;pendingBreak=null;}
+    else if(pendingBreak && i-pendingBreak.index>3)pendingBreak=null;
     const touched=c.high>=low&&c.low<=high;
     if(touched){
       touches++;
@@ -39,13 +65,17 @@ function zoneReport(d,candles){
       if(c.close<low)rejectBelow++;
     }
     if(previous!==null){
-      if(previous<=high&&c.close>high)breakAbove++;
-      if(previous>=low&&c.close<low)breakBelow++;
+      if(previous<=high&&c.close>high){
+        breakAbove++;pendingBreak={index:i,side:'up'};
+      }
+      if(previous>=low&&c.close<low){
+        breakBelow++;pendingBreak={index:i,side:'down'};
+      }
     }
     previous=c.close;
   }
-  return {touches,rejectAbove,rejectBelow,breakAbove,breakBelow,
-    label:'Zone / S&R',detail:`${touches} candle menyentuh · ${rejectAbove+rejectBelow} menutup di luar zona setelah sentuh`,
+  return {touches,rejectAbove,rejectBelow,breakAbove,breakBelow,fakeout,
+    label:'Zone / S&R',detail:`${touches} touches · ${breakAbove} break ↑ · ${breakBelow} break ↓ · ${fakeout} fakeout (≤3 bars)`,
     status:touches?'Observed':'No touches yet',strength:null};
 }
 function planReport(d,candles){

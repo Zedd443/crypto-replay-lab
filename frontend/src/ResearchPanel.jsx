@@ -1,5 +1,5 @@
 import React,{useMemo,useState} from 'react';
-import {analyzeDrawings,evaluateTrades} from './research.js';
+import {analyzeDrawings,evaluateTrades,structureSnapshot} from './research.js';
 
 const fmt=v=>v==null||!Number.isFinite(v)?'—':v.toLocaleString(undefined,{maximumFractionDigits:3});
 const pct=v=>v==null?'—':v.toFixed(1)+'%';
@@ -16,6 +16,7 @@ export default function ResearchPanel({orders,drawings,candles,session}){
   const [tab,setTab]=useState('trades');
   const result=useMemo(()=>evaluateTrades(orders),[orders]);
   const readings=useMemo(()=>analyzeDrawings(drawings,candles),[drawings,candles]);
+  const structure=useMemo(()=>structureSnapshot(candles),[candles]);
   return <section className="research-panel" aria-label="Trade analytics and drawing research">
     <div className="research-tabs">
       <strong>RESEARCH DESK</strong>
@@ -47,7 +48,12 @@ export default function ResearchPanel({orders,drawings,candles,session}){
         </div>
       </div>
     </>:<>
-      <div className="pattern-intro">Membaca geometri yang lu gambar terhadap OHLC replay yang sudah terlihat. Event dihitung setelah gambar dibuat; ini <strong>bukan</strong> pengujian profitabilitas strategi.</div>
+      <div className="structure-readout">
+        <div><small>MARKET STRUCTURE</small><strong>{structure.regime}</strong></div>
+        <div><small>Last confirmed swings</small><strong>{structure.high||'—'} / {structure.low||'—'}</strong></div>
+        <div><small>Pivot levels</small><strong>{structure.lastHigh?.toFixed(4)||'—'} / {structure.lastLow?.toFixed(4)||'—'}</strong></div>
+      </div>
+      <div className="pattern-intro">Membaca drawing terhadap OHLC replay yang sudah terlihat. Pivot butuh dua candle konfirmasi, event zona baru dihitung setelah gambar dibuat. Ini <strong>bukan</strong> validasi profitabilitas strategi.</div>
       {readings.length?<div className="pattern-cards">{readings.map(x=><article className="pattern-card" key={x.id} style={{borderLeftColor:x.color}}>
         <div className="pattern-heading"><b>{x.label}</b><span>{x.status}</span></div>
         <p>{x.detail}</p>

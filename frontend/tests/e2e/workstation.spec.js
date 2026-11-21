@@ -151,3 +151,56 @@ test('signal lab calculates holding-period rows without mock numbers',async({pag
   await page.getByLabel('Holding period').fill('10');
   await expect(page.locator('.signal-table tbody tr.active td').first()).toHaveText('10 candles');
 });
+
+test('future plotting slots show and persist a drawing beyond latest replay candle',async({page})=>{
+  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
+  const base='/api/sessions/'+sid;
+  const before=await (await page.request.get(base)).json();
+  const last=(await (await page.request.get(base+'/candles?tf=1h')).json()).candles.at(-1);
+  const result=await page.request.post(base+'/drawings',{data:{
+    kind:'rectangle',timeframe:'1h',price:last.close*.97,end_price:last.close*1.03,
+    anchor_start:last.time+3600000,anchor_end:last.time+3600000*10
+  }});
+  expect(result.status()).toBe(201);
+  const drawingId=(await result.json()).id;
+  await page.reload();
+  await page.getByRole('button',{name:/Ghost candles OFF/}).click();
+  await page.getByRole('button',{name:'Show future area'}).click();
+  await expect(page.locator('.chart-shape-rectangle[data-drawing-id="'+drawingId+'"]')).toBeVisible();
+  const saved=(await (await page.request.get(base+'/drawings')).json()).find(x=>x.id===drawingId);
+  expect(saved.anchor_end).toBeGreaterThan(before.clock_ms);
+});
+test('ghost candle controls create a labeled hypothetical scenario',async({page})=>{
+  await page.getByRole('button',{name:/Ghost candles OFF/}).click();
+  await page.getByLabel('Ghost candle count').fill('6');
+  await page.getByLabel('Ghost projected move percent').fill('-3');
+  await page.getByLabel('Show ghost candles').check();
+  await expect(page.getByText('SCENARIO ONLY · NOT REAL MARKET DATA')).toBeVisible();
+  await expect(page.getByRole('button',{name:/Ghost candles ON/})).toBeVisible();
+});
+test('Snap Entry to Market keeps R:R distances and enables paper execution',async({page})=>{
+  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
+  const base='/api/sessions/'+sid;
+  const candles=(await (await page.request.get(base+'/candles?tf=1h')).json()).candles;
+  const market=candles.at(-1).close,entry=market*.97,stop=market*.95,target=market*1.01;
+  const create=await page.request.post(base+'/drawings',{data:{
+    kind:'long_position',timeframe:'1h',price:entry,end_price:stop,take_profit:target,
+    anchor_start:candles.at(-3).time,anchor_end:candles.at(-2).time
+  }});
+  expect(create.status()).toBe(201);
+  const id=(await create.json()).id;
+  await page.reload();
+  await page.getByRole('button',{name:/Drawings \(/}).click();
+  await page.getByRole('button',{name:/long_position/}).first().click();
+  const button=page.getByRole('button',{name:/Snap Entry to Market/});
+  await expect(button).toBeVisible();
+  await button.click();
+  await expect.poll(async()=>{
+    const x=(await (await page.request.get(base+'/drawings')).json()).find(x=>x.id===id);
+    return x?.price;
+  }).toBeCloseTo(market,4);
+  const drawn=(await (await page.request.get(base+'/drawings')).json()).find(x=>x.id===id);
+  expect(drawn.price-drawn.end_price).toBeCloseTo(entry-stop,4);
+  expect(drawn.take_profit-drawn.price).toBeCloseTo(target-entry,4);
+  await expect(page.getByRole('button',{name:'Execute Paper Long'})).toBeEnabled();
+});

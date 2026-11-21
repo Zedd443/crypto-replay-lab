@@ -2,7 +2,7 @@ import React, {useEffect,useRef,useState} from 'react';
 import {FIB_LEVELS} from './research.js';
 
 const isPosition = kind => kind === 'long_position' || kind === 'short_position';
-const editable = kind => kind === 'rectangle' || kind === 'fib' || isPosition(kind);
+const editable = kind => kind === 'rectangle' || kind === 'fib' || kind==='trendline' || isPosition(kind);
 
 /** DOM overlay for editable, price/time anchored drawings. No orders are placed by drawings. */
 export default function ShapeOverlay({chart,series,drawings,selected,onSelect,onEdit,draft,disabled}){
@@ -33,7 +33,7 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
           const y2=d.end_price!=null?s.priceToCoordinate(d.end_price):null;
           const tp=isPosition(d.kind)?s.priceToCoordinate(d.take_profit):null;
           const good=x1!=null && (d.kind==='vertical'||y1!=null) &&
-            (!['rectangle','fib','long_position','short_position'].includes(d.kind)||(x2!=null&&y2!=null)) &&
+            (!['rectangle','fib','trendline','long_position','short_position'].includes(d.kind)||(x2!=null&&y2!=null)) &&
             (!isPosition(d.kind)||tp!=null);
           el.style.visibility=good?'visible':'hidden';
           if(!good)continue;
@@ -44,6 +44,14 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
           el.style.transform='translate('+left+'px,'+top+'px)';
           el.style.width=(d.kind==='horizontal_ray'?Math.max(0,scale.width()-x1):Math.max(1,right-left))+'px';
           el.style.height=Math.max(1,bottom-top)+'px';
+          if(d.kind==='trendline'){
+            const line=el.querySelector('.trendline-segment');
+            if(line){
+              const ax=x1-left,ay=y1-top,bx=x2-left,by=y2-top;
+              line.style.width=Math.hypot(bx-ax,by-ay)+'px';
+              line.style.transform='translate('+ax+'px,'+ay+'px) rotate('+Math.atan2(by-ay,bx-ax)+'rad)';
+            }
+          }
           if(d.kind==='fib'){
             for(const level of el.querySelectorAll('[data-fib-ratio]')){
               const ratio=Number(level.dataset.fibRatio);
@@ -132,7 +140,7 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
     {items.map(d=>{
       const edit=editable(d.kind)&&d.id!=='draft';
       const direction=isPosition(d.kind);
-      const risk=Math.abs(d.price-d.end_price),reward=Math.abs(d.take_profit-d.price);
+      const risk=Math.abs(d.price-d.end_price),reward=isPosition(d.kind)?Math.abs(d.take_profit-d.price):0;
       return <div key={d.id} data-drawing-id={d.id}
         style={{'--drawing-color':d.color||'#f0c266'}}
         className={'chart-shape chart-shape-'+d.kind+(selected===d.id?' selected':'')+
@@ -145,6 +153,7 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
               (d.kind==='long_position'?'LONG':'SHORT')+' PLAN · R:R '+(risk?reward/risk:0).toFixed(2):
               part==='stop'?'SL':'TP'}</div>)}
         </>}
+        {d.kind==='trendline'&&<span className="trendline-segment" data-handle="move"/>}
         {d.kind==='fib'&&FIB_LEVELS.map(r=><span key={r} className="fib-level"
           data-fib-ratio={r}>{(r*100).toFixed(1)}%</span>)}
         {edit&&!direction&&<>

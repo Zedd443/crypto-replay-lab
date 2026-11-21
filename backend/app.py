@@ -443,7 +443,7 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                     db().execute("UPDATE drawings SET color=? WHERE id=?",(color,drawing_id))
             if not any(k in payload for k in ("price","end_price","anchor_start","anchor_end","take_profit")):
                 return jsonify({"id":drawing_id,"updated_at_cursor":state["cursor"]})
-            if existing["kind"] not in ("rectangle","fib","long_position","short_position"):
+            if existing["kind"] not in ("trendline","rectangle","fib","long_position","short_position"):
                 raise ValueError("geometry editing not supported for this drawing")
             price, stop = float(payload["price"]),float(payload["end_price"])
             start, end = int(payload["anchor_start"]),int(payload["anchor_end"])

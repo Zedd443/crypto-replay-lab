@@ -3,7 +3,8 @@ import { createChart, CandlestickSeries, HistogramSeries, LineSeries, CrosshairM
 import BracketOverlay from './BracketOverlay.jsx';
 import DrawingTools, {DRAWING_TOOLS} from './DrawingTools.jsx';
 import ShapeOverlay from './ShapeOverlay.jsx';
-import {calculateIndicator, INDICATORS} from './indicators.js';
+import {calculateIndicator, INDICATORS, INDICATOR_SETTINGS, DEFAULT_INDICATOR_OPTIONS} from './indicators.js';
+import {FIB_LEVELS} from './research.js';
 
 export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, onUpdateDrawing, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut }) {
   const rootRef = useRef(null);
@@ -13,14 +14,30 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const drawingModeRef = useRef(drawingMode);
   const onNewLineRef = useRef(onNewLine);
   const chartLinesRef = useRef([]);
+  const drawingPriceLabelsRef = useRef([]);
+  const candlesRef=useRef(candles);
+  candlesRef.current=candles;
   const trendlinesRef = useRef([]);
   const indicatorSeries = useRef(new Map());
   const indicatorMarkers = useRef(null);
   const displayedRef = useRef({key:null,length:0,last:null});
   const [indicatorMenu,setIndicatorMenu] = React.useState(false);
-  const [enabled,setEnabled] = React.useState([]);
+  const [enabled,setEnabled] = React.useState(()=>{
+    try{return JSON.parse(localStorage.getItem('crl-enabled-indicators')||'["ema"]');}catch{return ['ema'];}
+  });
+  const [parameters,setParameters]=React.useState(()=>{
+    try{return {...DEFAULT_INDICATOR_OPTIONS,...JSON.parse(localStorage.getItem('crl-indicator-settings')||'{}')};}
+    catch{return DEFAULT_INDICATOR_OPTIONS;}
+  });
+  const [drawingColor,setDrawingColor]=React.useState(()=>{
+    try{return localStorage.getItem('crl-drawing-color')||'#f0c266';}catch{return '#f0c266';}
+  });
   const activeIndicators=React.useMemo(()=>INDICATORS.filter(([id])=>enabled.includes(id))
-    .map(([id,label,kind])=>({id,label,kind,...calculateIndicator(id,candles)})),[enabled,candles]);
+    .map(([id,label,kind])=>({id,label,kind,...calculateIndicator(id,candles,parameters[id])})),
+    [enabled,candles,parameters]);
+  React.useEffect(()=>{try{localStorage.setItem('crl-enabled-indicators',JSON.stringify(enabled));}catch{/* ignored */}},[enabled]);
+  React.useEffect(()=>{try{localStorage.setItem('crl-indicator-settings',JSON.stringify(parameters));}catch{/* ignored */}},[parameters]);
+  const updateParameter=(id,key,value)=>setParameters(old=>({...old,[id]:{...(old[id]||{}),[key]:Number(value)}}));
   const toggleIndicator=(id,kind)=>setEnabled(previous=>{
     if(previous.includes(id))return previous.filter(value=>value!==id);
     const paneIds=INDICATORS.filter(entry=>entry[2]==='pane').map(entry=>entry[0]);
@@ -33,13 +50,19 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const [toolMenu,setToolMenu] = React.useState(false);
   const hasOpenPosition=paperPosition?.status==='open';
   const shapes=React.useMemo(()=>drawings.filter(d=>d.timeframe===timeframe &&
-    ['horizontal_ray','vertical','rectangle','long_position','short_position'].includes(d.kind)),[drawings,timeframe]);
+    ['horizontal_ray','vertical','rectangle','fib','long_position','short_position'].includes(d.kind)),[drawings,timeframe]);
   const showToolMenu=open=>{
     setToolMenu(open);
     if(open){setDrawingListOpen(false);setIndicatorMenu(false);}
   };
   const [selectedDrawing,setSelectedDrawing] = React.useState(null);
   const [draftShape,setDraftShape] = React.useState(null);
+  const chosen=drawings.find(d=>d.id===selectedDrawing);
+  const chooseColor=value=>{
+    setDrawingColor(value);
+    try{localStorage.setItem('crl-drawing-color',value);}catch{/* ignored */}
+    if(chosen)onUpdateDrawing(chosen.id,{color:value});
+  };
   busyRef.current = busy;
   const resetAnchor = () => {
     firstAnchor.current = null;
@@ -51,7 +74,10 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     setDraftShape(null);
   }, [drawingMode, timeframe, sessionId]);
   drawingModeRef.current = drawingMode;
-  onNewLineRef.current = onNewLine;
+  onNewLineRef.current = drawing=>{
+    onNewLine?.({...drawing,color:drawingColor});
+    onDrawingMode?.(null);
+  };
 
   useEffect(() => {
     if (!rootRef.current) return;
@@ -96,7 +122,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const makeDraft=(first,last,kind)=>{
       if(!first||!last||first.time===last.time)return null;
       const [a,b]=first.time<last.time?[first,last]:[last,first];
-      if(kind==='rectangle')return {id:'draft',kind,price:a.price,end_price:b.price,
+      if(kind==='rectangle'||kind==='fib')return {id:'draft',kind,price:a.price,end_price:b.price,
         anchor_start:a.time,anchor_end:b.time};
       const diff=Math.abs(last.price-first.price);
       if(diff<=0||!Number.isFinite(diff))return null;
@@ -110,7 +136,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const onPointerDown=(event)=>{
       pointerStart={x:event.clientX,y:event.clientY};
       const kind=drawingModeRef.current;
-      if(busyRef.current||event.button!==0||!['rectangle','long_position','short_position'].includes(kind))return;
+      if(busyRef.current||event.button!==0||!['rectangle','fib','long_position','short_position'].includes(kind))return;
       const anchor=point(event);
       if(!anchor)return;
       dragStart={anchor,x:event.clientX,y:event.clientY,kind};
@@ -132,13 +158,27 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       if(drawing&&Math.abs(event.clientX-start.x)>7&&Math.abs(event.clientY-start.y)>3){
         const {id,...payload}=drawing;
         onNewLineRef.current?.(payload);
+      }else if(['long_position','short_position'].includes(start.kind)){
+        // One-click placement: default SL 1%, TP 2%; immediately editable.
+        const anchor=start.anchor,scale=chart.timeScale(),bounds=pane.getBoundingClientRect();
+        const x=event.clientX-bounds.left-chart.priceScale('left').width();
+        const before=scale.coordinateToTime(Math.max(0,x-110));
+        const seriesBars=candlesRef.current;
+        const fallback=seriesBars[Math.max(0,seriesBars.length-12)]?.time;
+        const first=typeof before==='number'&&before*1000<anchor.time?before*1000:fallback;
+        const long=start.kind==='long_position',stop=anchor.price*(long?.99:1.01),target=anchor.price*(long?1.02:.98);
+        if(first!=null&&first<anchor.time&&stop>0&&target>0){
+          onNewLineRef.current?.({kind:start.kind,price:anchor.price,end_price:stop,take_profit:target,
+            anchor_start:first,anchor_end:anchor.time});
+        }
       }
       try{pane.releasePointerCapture(event.pointerId);}catch{/* capture already lost */}
       event.preventDefault();event.stopPropagation();
     };
     const onClick=(event) => {
-      if (busyRef.current || !drawingModeRef.current ||
-          ['rectangle','long_position','short_position'].includes(drawingModeRef.current) || !pointerStart ||
+      if(!drawingModeRef.current){setSelectedDrawing(null);return;}
+      if (busyRef.current ||
+          ['rectangle','fib','long_position','short_position'].includes(drawingModeRef.current) || !pointerStart ||
           Math.hypot(event.clientX-pointerStart.x,event.clientY-pointerStart.y)>5) return;
       const bounds=pane.getBoundingClientRect();
       const scale=chart.timeScale();
@@ -246,7 +286,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     if (!series) return;
     for (const pl of chartLinesRef.current) series.removePriceLine(pl);
     chartLinesRef.current=drawings.filter(d=>d.kind==='horizontal').map(d=>series.createPriceLine({
-      price:d.price, color:d.id===selectedDrawing?'#8BE1FF':'#F0C266',lineWidth:2,lineStyle:2,
+      price:d.price, color:d.color||'#f0c266',lineWidth:2,lineStyle:2,
       axisLabelVisible:true,title:'User S/R'
     }));
     const chart=chartRef.current;
@@ -254,13 +294,42 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const times = new Set(candles.map(c=>c.time));
     trendlinesRef.current=drawings.filter(d=>d.kind==='trendline' && d.timeframe===timeframe &&
       times.has(d.anchor_start) && times.has(d.anchor_end)).map(d=>{
-      const line=chart.addSeries(LineSeries,{color:d.id===selectedDrawing?'#8BE1FF':'#F0C266',lineWidth:2,
+      const line=chart.addSeries(LineSeries,{color:d.color||'#f0c266',lineWidth:2,
         priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
         autoscaleInfoProvider:()=>null});
       line.setData([{time:d.anchor_start/1000,value:d.price},{time:d.anchor_end/1000,value:d.end_price}]);
       return line;
     });
   }, [drawings,candles,timeframe,selectedDrawing]);
+
+  useEffect(()=>{
+    const series=candleSeriesRef.current;
+    if(!series)return;
+    for(const line of drawingPriceLabelsRef.current)series.removePriceLine(line);
+    const selected=drawings.find(d=>d.id===selectedDrawing);
+    const visible=drawings.filter(d=>d.timeframe===timeframe).slice(-25);
+    const levels=[];
+    for(const d of visible){
+      if(!Number.isFinite(d.price))continue;
+      if(d.kind!=='horizontal')levels.push({price:d.price,color:d.color||'#f0c266',
+        label:d.kind==='long_position'?'Entry':d.kind==='fib'?'Fib 0':'Drawing'});
+      if(d.id===selectedDrawing){
+        if(Number.isFinite(d.end_price))levels.push({price:d.end_price,color:d.color||'#f0c266',
+          label:d.kind==='long_position'||d.kind==='short_position'?'SL':'End'});
+        if(Number.isFinite(d.take_profit))levels.push({price:d.take_profit,color:'#48d6ab',label:'TP'});
+        if(d.kind==='fib')for(const ratio of FIB_LEVELS.slice(1,-2)){
+          levels.push({price:d.price+(d.end_price-d.price)*ratio,color:d.color||'#f0c266',
+            label:(ratio*100).toFixed(1)+'%'});
+        }
+      }
+    }
+    drawingPriceLabelsRef.current=levels.map(l=>series.createPriceLine({
+      price:l.price,color:l.color,lineWidth:1,lineStyle:2,
+      lineVisible:false,axisLabelVisible:true,title:l.label
+    }));
+    return()=>{for(const line of drawingPriceLabelsRef.current)series.removePriceLine(line);
+      drawingPriceLabelsRef.current=[];};
+  },[drawings,timeframe,selectedDrawing]);
 
   useEffect(()=>{
     const chart=chartRef.current;
@@ -328,15 +397,21 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       <button aria-expanded={indicatorMenu} aria-controls="chart-indicators"
         onClick={()=>{setIndicatorMenu(open=>!open);setDrawingListOpen(false);setToolMenu(false);}}>Indicators ({enabled.length})</button>
       {indicatorMenu&&<section id="chart-indicators" className="chart-drawing-list indicator-list" aria-label="Indicators">
-        {INDICATORS.map(([id,label,kind])=><label key={id}>
-          <input type="checkbox" checked={enabled.includes(id)} onChange={()=>toggleIndicator(id,kind)}/>
-          {label}
-        </label>)}
-        <p>One lower-pane indicator at a time.</p>
+        {INDICATORS.map(([id,label,kind])=><div key={id} className="indicator-entry">
+          <label><input type="checkbox" checked={enabled.includes(id)} onChange={()=>toggleIndicator(id,kind)}/>
+          {label}</label>
+          {enabled.includes(id)&&<div className="indicator-params">{(INDICATOR_SETTINGS[id]||[]).map(
+            ([key,title,base,min,max])=><label key={key} title={title}>{title}
+              <input type="number" step={['deviation','minGap','threshold'].includes(key)?0.1:1}
+                min={min} max={max} value={parameters[id]?.[key]??base}
+                onChange={e=>updateParameter(id,key,e.target.value)}/></label>
+          )}</div>}
+        </div>)}
+        <p>Indicators are research aids, not validated buy/sell signals.</p>
       </section>}
       {awaitingEnd&&<span role="status">Pick second point</span>}
-      {['rectangle','long_position','short_position'].includes(drawingMode)&&
-        <span role="status">Drag on chart to create · drawings do not execute orders</span>}
+      {['rectangle','fib','long_position','short_position'].includes(drawingMode)&&
+        <span role="status">Drag to draw · tap to place Long/Short · Esc to cancel</span>}
       {drawingListOpen&&<section id="chart-drawing-list" className="chart-drawing-list" aria-label="Saved drawings">
         {drawings.length===0?<p>No drawings at this cursor</p>:<>
           <ul>{drawings.map(d=>{
@@ -354,6 +429,11 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
           </button>
         </>}
       </section>}
+    </div>
+    <div className="drawing-color-control" title="Default drawing color or selected drawing color">
+      <label>{chosen?'Selected color':'Drawing color'} <input aria-label="Drawing color"
+        type="color" value={chosen?.color||drawingColor} onChange={e=>chooseColor(e.target.value)}/></label>
+      {chosen&&<button onClick={()=>setSelectedDrawing(null)}>Deselect</button>}
     </div>
     <div className="chart-view-tools">
       <button onClick={()=>chartRef.current?.timeScale().fitContent()}>Fit</button>

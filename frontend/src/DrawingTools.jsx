@@ -6,11 +6,12 @@ export const DRAWING_TOOLS=[
   {id:'horizontal_ray',label:'Horizontal ray',icon:'\u2192',key:'J',group:'Lines'},
   {id:'vertical',label:'Vertical line',icon:'\u2503',key:'V',group:'Lines'},
   {id:'rectangle',label:'Rectangle',icon:'\u25ad',key:'R',group:'Shapes'},
+  {id:'fib',label:'Fibonacci retracement',icon:'≡',key:'F',group:'Shapes'},
   {id:'long',label:'Long R:R drawing',icon:'L',key:'L',group:'Paper trading'},
   {id:'short',label:'Short R:R drawing',icon:'S',key:'S',group:'Paper trading'},
 ];
 const storageKey='crl-drawing-favorites';
-const initialFavorites=['trendline','rectangle','long','short'];
+const initialFavorites=['trendline','rectangle','fib','long','short'];
 
 export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade}){
   const menu=useRef(null);

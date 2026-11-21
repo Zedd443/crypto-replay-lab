@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import ChartPanel from './ChartPanel.jsx';
 import OrderPanel from './OrderPanel.jsx';
+import ResearchPanel from './ResearchPanel.jsx';
 
 const TFS=['1m','5m','15m','30m','1h','4h','1d','1w'];
 const baseTf=(ms)=>ms===900000?'15m':'1m';
@@ -21,7 +22,7 @@ export default function App() {
   const [tf,setTf]=useState('1h');
   const [drawings,setDrawings]=useState([]);
   const [orders,setOrders]=useState([]);
-  const [showOrders,setShowOrders]=useState(false);
+  const [showOrders,setShowOrders]=useState(true);
   const [selectedPosition,setSelectedPosition]=useState(null);
   const [tradeShortcut,setTradeShortcut]=useState(null);
   const openTradeShortcut=side=>{setShowOrders(true);setTradeShortcut({side});};
@@ -275,6 +276,13 @@ export default function App() {
             paperPosition={activePosition} onAdjustPosition={adjustPosition}
             positionLocked={busy||session?.cursor!==session?.max_seen_cursor}
             onTradeShortcut={openTradeShortcut}/>
+          <aside className="trade-rail" aria-label="Paper trade controls">
+            <div className="rail-heading"><strong>TRADE CONTROL</strong><span>PAPER ONLY</span></div>
+            {showOrders&&session?<OrderPanel orders={orders} busy={busy} session={session}
+              onPlace={placeOrder} onManage={manageOrder} activePosition={activePosition?.id}
+              onSelect={setSelectedPosition} shortcut={tradeShortcut}/>:
+              <button onClick={()=>setShowOrders(true)}>Show trade controls</button>}
+          </aside>
           <aside className="sideinfo">
             <div className="small-label">REPLAY CLOCK</div>
             <div className="clock">{blind?'DATE HIDDEN':date}</div>
@@ -290,9 +298,6 @@ export default function App() {
             <div className="note">Blind toggle hides labels only. It is NOT certified blind testing: price patterns may reveal history.</div>
           </aside>
         </div>
-        {showOrders&&session&&<OrderPanel orders={orders} busy={busy} session={session}
-          onPlace={placeOrder} onManage={manageOrder} activePosition={activePosition?.id}
-          onSelect={setSelectedPosition} shortcut={tradeShortcut}/>}
         <div className="playback">
           <span>REPLAY</span>
           <button disabled={busy||!session} onClick={()=>step(-20)}>−20</button>
@@ -303,6 +308,7 @@ export default function App() {
           <button disabled={busy||!session} onClick={()=>step(20)}>+20</button>
           <span className="muted">Step = candle TF aktif ({tf.toUpperCase()})</span>
         </div>
+        <ResearchPanel orders={orders} drawings={drawings} candles={candles} session={session}/>
       </section>
     </main>
   </div>;

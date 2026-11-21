@@ -1,7 +1,8 @@
 import React, {useEffect,useRef,useState} from 'react';
+import {FIB_LEVELS} from './research.js';
 
 const isPosition = kind => kind === 'long_position' || kind === 'short_position';
-const editable = kind => kind === 'rectangle' || isPosition(kind);
+const editable = kind => kind === 'rectangle' || kind === 'fib' || isPosition(kind);
 
 /** DOM overlay for editable, price/time anchored drawings. No orders are placed by drawings. */
 export default function ShapeOverlay({chart,series,drawings,selected,onSelect,onEdit,draft,disabled}){
@@ -32,7 +33,7 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
           const y2=d.end_price!=null?s.priceToCoordinate(d.end_price):null;
           const tp=isPosition(d.kind)?s.priceToCoordinate(d.take_profit):null;
           const good=x1!=null && (d.kind==='vertical'||y1!=null) &&
-            (!['rectangle','long_position','short_position'].includes(d.kind)||(x2!=null&&y2!=null)) &&
+            (!['rectangle','fib','long_position','short_position'].includes(d.kind)||(x2!=null&&y2!=null)) &&
             (!isPosition(d.kind)||tp!=null);
           el.style.visibility=good?'visible':'hidden';
           if(!good)continue;
@@ -43,6 +44,13 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
           el.style.transform='translate('+left+'px,'+top+'px)';
           el.style.width=(d.kind==='horizontal_ray'?Math.max(0,scale.width()-x1):Math.max(1,right-left))+'px';
           el.style.height=Math.max(1,bottom-top)+'px';
+          if(d.kind==='fib'){
+            for(const level of el.querySelectorAll('[data-fib-ratio]')){
+              const ratio=Number(level.dataset.fibRatio);
+              const fy=s.priceToCoordinate(d.price+(d.end_price-d.price)*ratio);
+              if(fy!=null)level.style.top=(fy-top)+'px';
+            }
+          }
           if(isPosition(d.kind)){
             const reward=el.querySelector('[data-zone="reward"]'),risk=el.querySelector('[data-zone="risk"]');
             if(reward){reward.style.top=(Math.min(y1,tp)-top)+'px';reward.style.height=Math.abs(y1-tp)+'px';}
@@ -126,6 +134,7 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
       const direction=isPosition(d.kind);
       const risk=Math.abs(d.price-d.end_price),reward=Math.abs(d.take_profit-d.price);
       return <div key={d.id} data-drawing-id={d.id}
+        style={{'--drawing-color':d.color||'#f0c266'}}
         className={'chart-shape chart-shape-'+d.kind+(selected===d.id?' selected':'')+
           (d.id==='draft'?' draft':'')+(edit?' editable':'')} title={edit?'Drag to move; drag handles to edit':''}>
         {direction&&<>
@@ -136,6 +145,8 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
               (d.kind==='long_position'?'LONG':'SHORT')+' PLAN · R:R '+(risk?reward/risk:0).toFixed(2):
               part==='stop'?'SL':'TP'}</div>)}
         </>}
+        {d.kind==='fib'&&FIB_LEVELS.map(r=><span key={r} className="fib-level"
+          data-fib-ratio={r}>{(r*100).toFixed(1)}%</span>)}
         {edit&&!direction&&<>
           <span className={'shape-handle start '+(d.price>=d.end_price?'top':'bottom')} data-handle="start"/>
           <span className={'shape-handle end '+(d.price>=d.end_price?'bottom':'top')} data-handle="end"/>

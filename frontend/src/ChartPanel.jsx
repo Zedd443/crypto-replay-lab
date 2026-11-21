@@ -5,6 +5,7 @@ import DrawingTools, {DRAWING_TOOLS} from './DrawingTools.jsx';
 import ShapeOverlay from './ShapeOverlay.jsx';
 import {calculateIndicator, INDICATORS, INDICATOR_SETTINGS, DEFAULT_INDICATOR_OPTIONS} from './indicators.js';
 import {FIB_LEVELS} from './research.js';
+import {futureSlots,ghostScenario,FUTURE_SPACE_BARS} from './ghostScenario.js';
 
 export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, onUpdateDrawing, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut,
   selectedDrawing, onSelectDrawing, orders=[], onSignalSelection }) {
@@ -12,6 +13,15 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
+  const ghostSeriesRef=useRef(null);
+  const [ghostOpen,setGhostOpen]=React.useState(false);
+  const [ghostVisible,setGhostVisible]=React.useState(false);
+  const [ghostCount,setGhostCount]=React.useState(8);
+  const [ghostMove,setGhostMove]=React.useState(2);
+  const [ghostWick,setGhostWick]=React.useState(.25);
+  const ghostBars=React.useMemo(()=>ghostScenario(candles,timeframe,{
+    count:ghostCount,movePct:ghostMove,wickPct:ghostWick
+  }),[candles,timeframe,ghostCount,ghostMove,ghostWick]);
   const drawingModeRef = useRef(drawingMode);
   const onNewLineRef = useRef(onNewLine);
   const chartLinesRef = useRef([]);
@@ -126,6 +136,15 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       priceLineVisible: false,
     });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+    // Scenarios are a separate visual series, never appended to actual candles.
+    const ghost=chart.addSeries(CandlestickSeries,{
+      upColor:'rgba(69,208,177,.22)',downColor:'rgba(244,121,142,.22)',
+      borderUpColor:'rgba(69,208,177,.75)',borderDownColor:'rgba(244,121,142,.75)',
+      wickUpColor:'rgba(69,208,177,.62)',wickDownColor:'rgba(244,121,142,.62)',
+      lastValueVisible:false,priceLineVisible:false,title:'',
+      crosshairMarkerVisible:false
+    });
+    ghostSeriesRef.current=ghost;
     chartRef.current=chart;
     candleSeriesRef.current=series;
     volumeSeriesRef.current=volume;
@@ -282,6 +301,10 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const ohlc=candles.map(c=>({
       time:c.time/1000,open:c.open,high:c.high,low:c.low,close:c.close,
     }));
+    // Whitespace is part of the chart time grid, not real future OHLCV data.
+    // This grants drawing anchors and timeToCoordinate positions past the replay frontier.
+    const slots=futureSlots(candles.at(-1)?.time,timeframe).map(t=>({time:t/1000}));
+    const chartData=[...ohlc,...slots];
     const volumeBars=candles.map(c=>({
       time:c.time/1000,value:c.volume,color:c.close>=c.open?'#286c61':'#784448'
     }));
@@ -291,24 +314,25 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       localStorage.setItem('crl-view:'+prev.key,JSON.stringify(visible));
     }catch{/* storage disabled */}
     const last=ohlc.at(-1)?.time??null;
-    const append=prev.key===key&&prev.length===ohlc.length-1&&prev.last===ohlc.at(-2)?.time;
-    const replaceLast=prev.key===key&&prev.length===ohlc.length&&prev.last===last;
     displayedRef.current={key,length:ohlc.length,last};
-    if((append||replaceLast)&&last!==null){
-      series.update(ohlc.at(-1));vol.update(volumeBars.at(-1));
-    }else{
-      series.setData(ohlc);vol.setData(volumeBars);
-      if(prev.key!==key){
-        let saved=null;
-        try{saved=JSON.parse(localStorage.getItem('crl-view:'+key)||'null');}catch{/* ignore */}
-        if(saved&&Number.isFinite(saved.from)&&Number.isFinite(saved.to)){
-          scale.setVisibleLogicalRange(saved);
-        }else showRecent(chart,candles.length,hasOpenPosition);
-      }else if(visible&&Number.isFinite(visible.from)&&Number.isFinite(visible.to)){
-        scale.setVisibleLogicalRange(visible);
-      }
+    // Cannot use incremental series.update after a trailing future whitespace grid.
+    series.setData(chartData);vol.setData(volumeBars);
+    if(prev.key!==key){
+      let saved=null;
+      try{saved=JSON.parse(localStorage.getItem('crl-view:'+key)||'null');}catch{/* ignore */}
+      if(saved&&Number.isFinite(saved.from)&&Number.isFinite(saved.to)){
+        scale.setVisibleLogicalRange(saved);
+      }else showRecent(chart,candles.length,hasOpenPosition);
+    }else if(visible&&Number.isFinite(visible.from)&&Number.isFinite(visible.to)){
+      scale.setVisibleLogicalRange(visible);
     }
   }, [candles,timeframe,sessionId]);
+
+  useEffect(()=>{
+    const ghost=ghostSeriesRef.current;
+    if(!ghost)return;
+    ghost.setData(ghostVisible?ghostBars:[]);
+  },[ghostVisible,ghostBars]);
 
   useEffect(()=>{
     const scale=chartRef.current?.timeScale();
@@ -511,6 +535,30 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
         type="color" value={chosen?.color||drawingColor} onChange={e=>chooseColor(e.target.value)}/></label>
       {chosen&&<button onClick={()=>setSelectedDrawing(null)}>Deselect</button>}
     </div>
+    <div className="ghost-controls">
+      <button aria-expanded={ghostOpen} aria-controls="ghost-scenario-controls"
+        onClick={()=>setGhostOpen(v=>!v)}>Ghost candles {ghostVisible?'ON':'OFF'}</button>
+      {ghostOpen&&<div id="ghost-scenario-controls" className="ghost-settings">
+        <strong>MANUAL FUTURE SCENARIO</strong>
+        <p>Hypothetical only. Not real candles, signals, or replay data.</p>
+        <label><input type="checkbox" checked={ghostVisible}
+          onChange={e=>setGhostVisible(e.target.checked)}/> Show ghost candles</label>
+        <label>Projected candles <input aria-label="Ghost candle count" type="number" min="1" max="20" step="1"
+          value={ghostCount} onChange={e=>setGhostCount(Math.min(20,Math.max(1,Number(e.target.value)||1)))}/></label>
+        <label>Price move % <input aria-label="Ghost projected move percent" type="number"
+          min="-25" max="25" step=".1" value={ghostMove}
+          onChange={e=>setGhostMove(Math.min(25,Math.max(-25,Number(e.target.value)||0)))}/></label>
+        <label>Wick % <input aria-label="Ghost wick percent" type="number"
+          min="0" max="5" step=".1" value={ghostWick}
+          onChange={e=>setGhostWick(Math.min(5,Math.max(0,Number(e.target.value)||0)))}/></label>
+        <button onClick={()=>{
+          chartRef.current?.timeScale().setVisibleLogicalRange({
+            from:Math.max(0,candles.length-65),to:candles.length+Math.max(12,ghostCount+6)
+          });
+        }}>Show future area</button>
+      </div>}
+    </div>
+    {ghostVisible&&<div className="ghost-watermark">SCENARIO ONLY · NOT REAL MARKET DATA</div>}
     <div className="chart-view-tools">
       <button onClick={()=>chartRef.current?.timeScale().fitContent()}>Fit</button>
       <button onClick={reset}>Reset</button>
@@ -522,10 +570,9 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
 }
 
 function showRecent(chart,count,padPosition) {
-  if(count<=200&&!padPosition){
-    chart.timeScale().fitContent();
-    return;
-  }
-  const padding=padPosition?Math.min(18,Math.max(3,Math.ceil(count*0.09))):0;
-  chart.timeScale().setVisibleLogicalRange({from:Math.max(0,count-200),to:count-1+padding});
+  if(!count)return;
+  // Always reserve visible future plotting space. Panning exposes up to 80 empty slots.
+  const from=Math.max(0,count-(count<150?count:140));
+  const padding=padPosition?22:16;
+  chart.timeScale().setVisibleLogicalRange({from,to:count-1+padding});
 }

@@ -320,3 +320,36 @@ test('trendline supports extending in both directions',async({page})=>{
     return items.find(x=>x.kind==='trendline')?.extend_mode;
   }).toBe('both');
 });
+
+test('closed linked Long plan archives box while preserving trade history and opt-in toggle',async({page})=>{
+  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
+  const base='/api/sessions/'+sid;
+  const session=(await (await page.request.get(base)).json());
+  const candles=(await (await page.request.get(base+'/candles?tf=1h')).json()).candles;
+  const market=candles.at(-1).close;
+  const drawing=await page.request.post(base+'/drawings',{data:{
+    kind:'long_position',timeframe:'1h',price:market,
+    end_price:market*.99,take_profit:market*1.02,
+    anchor_start:candles.at(-3).time,anchor_end:candles.at(-2).time
+  }});
+  expect(drawing.status()).toBe(201);
+  const drawingId=(await drawing.json()).id;
+  const placed=await page.request.post(base+'/orders',{data:{
+    mode:'bracket',side:'long',quantity:1,drawing_id:drawingId,cursor:session.cursor
+  }});
+  expect(placed.status()).toBe(201);
+  const orderId=(await placed.json()).id;
+  const closed=await page.request.post(base+'/paper-positions/'+orderId+'/close',{
+    data:{cursor:session.cursor}
+  });
+  expect(closed.status()).toBe(200);
+  await page.reload();
+  await expect(page.locator('.chart-shape-long_position')).toHaveCount(0);
+  const history=(await (await page.request.get(base+'/orders')).json());
+  expect(history.find(x=>x.id===orderId)?.status).toBe('closed');
+  await page.getByRole('button',{name:/Drawings \(/}).click();
+  const toggle=page.getByLabel(/Show archived plans/);
+  await expect(toggle).toBeVisible();
+  await toggle.check();
+  await expect(page.locator('.chart-shape-long_position')).toHaveCount(1);
+});

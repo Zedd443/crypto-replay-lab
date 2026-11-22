@@ -2,6 +2,7 @@ import React, {useEffect,useRef,useState} from 'react';
 
 export const DRAWING_TOOLS=[
   {id:'trendline',label:'Trendline',icon:'\u2571',key:'T',group:'Lines'},
+  {id:'polyline',label:'Multi-point trendline',icon:'⌁',key:'P',group:'Lines'},
   {id:'horizontal',label:'Horizontal line',icon:'\u2501',key:'H',group:'Lines'},
   {id:'horizontal_ray',label:'Horizontal ray',icon:'\u2192',key:'J',group:'Lines'},
   {id:'vertical',label:'Vertical line',icon:'\u2503',key:'V',group:'Lines'},
@@ -11,8 +12,27 @@ export const DRAWING_TOOLS=[
   {id:'long',label:'Long R:R drawing',icon:'L',key:'L',group:'Paper trading'},
   {id:'short',label:'Short R:R drawing',icon:'S',key:'S',group:'Paper trading'},
 ];
+function ToolIcon({kind}){
+  const common={fill:'none',stroke:'currentColor',strokeWidth:1.75,
+    strokeLinecap:'round',strokeLinejoin:'round'};
+  const elements={
+    trendline:<><path d="M4 19 20 5"/><circle cx="4" cy="19" r="2"/><circle cx="20" cy="5" r="2"/></>,
+    polyline:<><path d="m3 17 6-9 6 6 6-10"/><circle cx="3" cy="17" r="1.5"/><circle cx="9" cy="8" r="1.5"/><circle cx="15" cy="14" r="1.5"/><circle cx="21" cy="4" r="1.5"/></>,
+    horizontal:<><path d="M2 12h20"/><circle cx="12" cy="12" r="2"/></>,
+    horizontal_ray:<><path d="M4 12h16m-4-4 4 4-4 4"/><circle cx="4" cy="12" r="2"/></>,
+    vertical:<><path d="M12 2v20"/><circle cx="12" cy="12" r="2"/></>,
+    rectangle:<><rect x="4" y="5" width="16" height="14" rx="1.5"/><circle cx="4" cy="5" r="1.5"/><circle cx="20" cy="19" r="1.5"/></>,
+    fib:<><path d="M3 5h18M6 9h15M3 13h18M8 17h13M3 21h18"/></>,
+    ghost_feed:<><path d="M3 17 8 10 12 14 18 5l3 4" strokeDasharray="3 2"/><path d="M4 5v5m6-3v8m6-6v8"/></>,
+    long:<><path d="M5 20V4m0 0L2 8m3-4 3 4M11 20V9m0 0h8m-8 0 4-4m-4 4 4 4"/><path d="M19 20h-8"/></>,
+    short:<><path d="M5 4v16m0 0-3-4m3 4 3-4M11 4v11m0 0h8m-8 0 4-4m-4 4 4 4"/><path d="M19 4h-8"/></>,
+  };
+  return <svg className="tool-icon" viewBox="0 0 24 24" aria-hidden="true" {...common}>
+    {elements[kind]||<circle cx="12" cy="12" r="5"/>}
+  </svg>;
+}
 const storageKey='crl-drawing-favorites';
-const initialFavorites=['trendline','rectangle','fib','ghost_feed','long','short'];
+const initialFavorites=['horizontal','horizontal_ray','trendline','polyline','rectangle','fib','ghost_feed','long','short'];
 
 export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade}){
   const menu=useRef(null);
@@ -90,7 +110,7 @@ export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade
           <h3>{group}</h3>
           {DRAWING_TOOLS.filter(tool=>tool.group===group).map(tool=><div className="drawing-tool-option" key={tool.id}>
             <button type="button" disabled={disabled} aria-pressed={mode===(tool.id==='long'?'long_position':tool.id==='short'?'short_position':tool.id)} onClick={()=>choose(tool)}>
-              <span aria-hidden="true">{tool.icon}</span>{tool.label}<kbd>Alt+{tool.key}</kbd>
+              <ToolIcon kind={tool.id}/>{tool.label}<kbd>Alt+{tool.key}</kbd>
             </button>
             <button type="button" aria-label={'Favorite '+tool.label} aria-pressed={favorites.includes(tool.id)}
               title={'Favorite '+tool.label} onClick={()=>toggleFavorite(tool.id)}>
@@ -107,7 +127,7 @@ export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade
         onPointerCancel={()=>{grab.current=null;}}>&#8942;</button>
       {pinned.map(tool=><button key={tool.id} type="button" aria-label={'Shortcut '+tool.label}
         title={tool.label+' (Alt+'+tool.key+')'} disabled={disabled}
-        aria-pressed={mode===(tool.id==='long'?'long_position':tool.id==='short'?'short_position':tool.id)} className={'shortcut-'+tool.id} onClick={()=>choose(tool)}>{tool.icon}</button>)}
+        aria-pressed={mode===(tool.id==='long'?'long_position':tool.id==='short'?'short_position':tool.id)} className={'shortcut-'+tool.id} onClick={()=>choose(tool)}><ToolIcon kind={tool.id}/></button>)}
     </div>}
   </>;
 }

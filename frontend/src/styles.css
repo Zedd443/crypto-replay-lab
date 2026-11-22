@@ -403,3 +403,73 @@ button.accent:hover:not(:disabled){background:#348cf5}
 @media(max-width:700px){.assessment-layout{grid-template-columns:1fr}
 .assessment-stat-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 .assessment-results{grid-template-columns:1fr}}
+
+/* Chart UX refresh: lightweight vector tools, precise hover/selection and readable layers. */
+:root{--chart-glass:#12243beF;--chart-stroke:#416280;--chart-glow:#83ceef}
+.chart-frame button,.drawing-tool-menu button{transition:background-color .16s ease,border-color .16s ease,
+  color .16s ease,box-shadow .16s ease,transform .16s ease}
+.chart-frame button:focus-visible,.drawing-tool-menu button:focus-visible,
+.chart-frame select:focus-visible{outline:2px solid #80cff2;outline-offset:2px}
+.drawing-picker>button,.chart-view-tools button,.chart-drawing-tools>button{
+  background:linear-gradient(155deg,#203852f2,#15283fee);border:1px solid #496681;
+  color:#d5e9fa;border-radius:9px;box-shadow:0 6px 17px #040d1a55;
+  backdrop-filter:blur(12px);font-weight:600}
+.drawing-picker>button:hover,.chart-view-tools button:hover,.chart-drawing-tools>button:hover{
+  border-color:#75bbe2;box-shadow:0 5px 19px #3676ae36}
+.drawing-tool-menu{background:#14253af8;backdrop-filter:blur(16px);border-color:#506987;
+  border-radius:12px;box-shadow:0 18px 46px #030b1bc9;padding:8px}
+.drawing-tool-menu section{padding:3px}
+.drawing-tool-option{align-items:center;border-radius:8px}
+.drawing-tool-option:hover{background:#274461a0}
+.drawing-tool-option button:first-child{border-radius:7px;min-height:35px}
+.drawing-tool-option button:hover{transform:translateX(2px)}
+.drawing-tool-option .tool-icon{width:18px;height:18px;color:#a9d3f1;flex:0 0 auto}
+.drawing-tool-option button[aria-pressed=true] .tool-icon{color:#9ff0ec}
+.drawing-favorites{background:#142941e8;backdrop-filter:blur(16px);padding:5px;
+  border-color:#506987;box-shadow:0 12px 32px #031021a4;border-radius:13px;gap:3px}
+.drawing-favorites button{display:inline-flex;justify-content:center;align-items:center;
+  width:32px;height:32px;min-width:32px;padding:6px;border-radius:8px}
+.drawing-favorites button:hover:not(:disabled){background:#365b79;transform:translateY(-1px)}
+.drawing-favorites button[aria-pressed=true]{background:#2b617b;box-shadow:inset 0 0 0 1px #65a5c8}
+.drawing-favorites .tool-icon{height:18px;width:18px}
+.drawing-favorites .drawing-grip{width:22px;min-width:22px}
+.drawing-layer-controls{display:flex;flex-wrap:wrap;gap:10px;border-bottom:1px solid #3b5066;
+  padding:5px 3px 10px;margin-bottom:9px}
+.drawing-layer-controls label{font-size:11px;color:#c4d7e7;display:flex;gap:5px;align-items:center;white-space:normal}
+.drawing-layer-controls input{accent-color:#4cb8bf}
+.chart-drawing-list li.drawing-archived{opacity:.75}
+.drawing-archived-label{font-size:9px;padding:5px 2px;color:#a6bccf}
+.chart-shape-horizontal,.chart-shape-horizontal_ray{background:transparent!important;border:0}
+.chart-shape-horizontal .horizontal-line-hit,.chart-shape-horizontal_ray .horizontal-ray-hit{
+  position:absolute;left:0;top:-6px;width:100%;height:13px;
+  border-top:1px solid transparent;cursor:pointer;pointer-events:auto}
+.chart-shape-horizontal.selected .horizontal-line-hit,
+.chart-shape-horizontal_ray.selected .horizontal-ray-hit{border-top-color:#93e2ff}
+.chart-shape-horizontal .horizontal-line-hit:hover,
+.chart-shape-horizontal_ray .horizontal-ray-hit:hover{border-top-color:#72cceb}
+.chart-shape-trendline,.chart-shape-polyline{background:transparent!important;border:0!important;pointer-events:none!important}
+.chart-shape-trendline .trendline-segment{background:var(--drawing-color,#f0c266);
+  height:2px;min-width:10px;border-radius:3px;box-shadow:0 0 0 5px #40617c2a;
+  transition:box-shadow .13s ease}
+.chart-shape-trendline .trendline-segment:hover{box-shadow:0 0 0 7px #5fa6db39}
+.chart-shape-trendline.selected .trendline-segment{background:#8be1ff;box-shadow:0 0 0 5px #8be1ff29}
+.chart-shape-trendline .shape-handle{right:auto;bottom:auto;transform:translate(-50%,-50%);
+  width:12px;height:12px;border-radius:50%;background:#95dcf3;border:2px solid #09263c;
+  box-shadow:0 2px 8px #0017278c}
+.chart-shape-polyline .polyline-drawing{position:absolute;inset:0;width:100%;height:100%;
+  overflow:visible;pointer-events:none}
+.chart-shape-polyline .polyline-drawing polyline{pointer-events:stroke;cursor:pointer;
+  stroke-linejoin:round;stroke-linecap:round;filter:drop-shadow(0 1px 2px #061829);
+  stroke-width:4px}
+.chart-shape-polyline.selected .polyline-drawing polyline{stroke:#8be1ff}
+.chart-shape.draft .polyline-drawing polyline{stroke-dasharray:6 5;opacity:.8;pointer-events:none}
+.chart-shape:not(.draft):hover .shape-handle{box-shadow:0 0 0 4px #7dc7fb32}
+.chart-shape.selected{filter:drop-shadow(0 1px 5px #63b9e92c)}
+.drawing-color-control{border-radius:11px!important;backdrop-filter:blur(14px)}
+.trend-extend-control{display:inline-flex;align-items:center;gap:6px;color:#bcd6e7;font-size:11px}
+.trend-extend-control select{background:#172c43;border:1px solid #4c7090;border-radius:6px;
+  color:#e6f4ff;padding:5px}
+@media(max-width:700px){.drawing-favorites{gap:1px;right:6px;max-width:calc(100% - 12px)}
+ .drawing-favorites button{width:28px;min-width:28px;height:28px;padding:5px}
+ .drawing-favorites .tool-icon{width:16px;height:16px}}
+@media(prefers-reduced-motion:reduce){.chart-frame button,.drawing-tool-menu button{transition:none!important}}

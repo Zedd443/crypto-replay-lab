@@ -332,7 +332,7 @@ export default function App() {
         </div>
         <ResearchPanel orders={orders} drawings={drawings} candles={candles} session={session}
           timeframe={tf} isDemo={Boolean(datasets.find(d=>d.id===session?.dataset_id)?.is_demo)}
-          activeSignal={activeSignal}/>
+          activeSignal={activeSignal} selectedDrawing={selectedDrawing} onSelectDrawing={setSelectedDrawing}/>
       </section>
     </main>
   </div>;

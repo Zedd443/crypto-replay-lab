@@ -219,3 +219,50 @@ test('Snap Entry to Market keeps R:R distances and enables paper execution',asyn
   expect(drawn.take_profit-drawn.price).toBeCloseTo(target-entry,4);
   await expect(page.getByRole('button',{name:'Execute Paper Long'})).toBeEnabled();
 });
+
+test('drawing hypothesis can be locked and evaluated without paper order',async({page})=>{
+  await page.getByRole('button',{name:'Shortcut Rectangle'}).click();
+  const p=await at(page);
+  await page.mouse.move(p.x,p.y);
+  await page.mouse.down();
+  await page.mouse.move(p.x+105,p.y+75,{steps:6});
+  await page.mouse.up();
+  await expect(page.locator('.chart-shape-rectangle')).toHaveCount(1);
+  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
+  const base='/api/sessions/'+sid;
+  await page.getByRole('button',{name:'Drawing assessments'}).click();
+  await expect(page.getByLabel('Assessment drawing')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Lock hypothesis'})).toBeEnabled();
+  await page.getByLabel('Assessment horizon').fill('3');
+  await page.getByRole('button',{name:'Lock hypothesis'}).click();
+  await expect(page.getByText(/Hypothesis locked at cursor/)).toBeVisible();
+  await expect(page.getByRole('button',{name:'Already locked'})).toBeDisabled();
+  const result=(await (await page.request.get(base+'/assessments')).json());
+  expect(result.summary.locked).toBe(1);
+  expect(result.items[0].status).toBe('PENDING');
+  const orders=(await (await page.request.get(base+'/orders')).json());
+  expect(orders).toHaveLength(0);
+  await page.getByRole('button',{name:'+1 ▶'}).click();
+  await expect.poll(async()=>{
+    const response=await page.request.get(base+'/assessments');
+    const payload=await response.json();
+    return payload.items[0].observed;
+  }).toBeGreaterThanOrEqual(0);
+  await expect(page.getByText('Hypothesis accuracy')).toBeVisible();
+});
+test('rewind audit prevents creating scored hypotheses from known future',async({page})=>{
+  await page.getByRole('button',{name:'Shortcut Rectangle'}).click();
+  const p=await at(page);
+  await page.mouse.move(p.x,p.y);await page.mouse.down();
+  await page.mouse.move(p.x+110,p.y+75,{steps:5});await page.mouse.up();
+  await page.getByRole('button',{name:'Drawing assessments'}).click();
+  await page.getByRole('button',{name:'Lock hypothesis'}).click();
+  await expect(page.getByText(/Hypothesis locked at cursor/)).toBeVisible();
+  await page.getByRole('button',{name:'+1 ▶'}).click();
+  await page.getByRole('button',{name:'◀ −1'}).click();
+  await expect(page.getByText(/Rewind audit: this session/)).toBeVisible();
+  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
+  const items=(await (await page.request.get('/api/sessions/'+sid+'/assessments')).json()).items;
+  expect(items).toHaveLength(1);
+  await expect(page.getByRole('button',{name:'Already locked'})).toBeDisabled();
+});

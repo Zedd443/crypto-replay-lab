@@ -89,7 +89,8 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             created_at_ts INTEGER NOT NULL,
             anchor_start INTEGER, anchor_end INTEGER, end_price REAL, take_profit REAL,
             color TEXT NOT NULL DEFAULT '#f0c266',
-            ghost_range REAL NOT NULL DEFAULT 0.35, ghost_variance REAL NOT NULL DEFAULT 0.2
+            ghost_range REAL NOT NULL DEFAULT 0.35, ghost_variance REAL NOT NULL DEFAULT 0.2,
+            extend_mode TEXT NOT NULL DEFAULT 'none', points_json TEXT
         );
         CREATE TABLE IF NOT EXISTS drawing_edits (
           drawing_id TEXT NOT NULL, cursor INTEGER NOT NULL, price REAL NOT NULL,
@@ -105,7 +106,7 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
         if "base_ms" not in {column["name"] for column in conn.execute("PRAGMA table_info(datasets)")}:
             conn.execute("ALTER TABLE datasets ADD COLUMN base_ms INTEGER NOT NULL DEFAULT 60000")
         drawing_columns = {column["name"] for column in conn.execute("PRAGMA table_info(drawings)")}
-        for name, sql_type in (("anchor_start", "INTEGER"), ("anchor_end", "INTEGER"), ("end_price", "REAL"), ("take_profit", "REAL"), ("color", "TEXT NOT NULL DEFAULT '#f0c266'"), ("ghost_range","REAL NOT NULL DEFAULT 0.35"), ("ghost_variance","REAL NOT NULL DEFAULT 0.2")):
+        for name, sql_type in (("anchor_start", "INTEGER"), ("anchor_end", "INTEGER"), ("end_price", "REAL"), ("take_profit", "REAL"), ("color", "TEXT NOT NULL DEFAULT '#f0c266'"), ("ghost_range","REAL NOT NULL DEFAULT 0.35"), ("ghost_variance","REAL NOT NULL DEFAULT 0.2"), ("extend_mode","TEXT NOT NULL DEFAULT 'none'"), ("points_json","TEXT")):
             if name not in drawing_columns:
                 conn.execute(f"ALTER TABLE drawings ADD COLUMN {name} {sql_type}")
         exists = conn.execute("SELECT id FROM datasets WHERE id='synthetic-demo'").fetchone()
@@ -342,7 +343,8 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                    COALESCE(e.end_price,d.end_price) AS end_price,
                    COALESCE(e.take_profit,d.take_profit) AS take_profit,
                    d.color AS color, d.ghost_range AS ghost_range,
-                   d.ghost_variance AS ghost_variance
+                   d.ghost_variance AS ghost_variance,
+                   d.extend_mode AS extend_mode,d.points_json AS points_json
             FROM drawings AS d LEFT JOIN drawing_edits AS e
               ON e.drawing_id=d.id AND e.cursor=(
                 SELECT MAX(cursor) FROM drawing_edits
@@ -351,7 +353,8 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             WHERE d.session_id=? AND d.created_at_cursor<=?
             ORDER BY d.created_at_cursor
         """,(row["cursor"],session_id,row["cursor"])).fetchall()
-        return jsonify([dict(row) for row in rows])
+        import json
+        return jsonify([{**dict(r),"points":json.loads(r["points_json"]) if r["points_json"] else None} for r in rows])
 
     @app.delete("/api/sessions/<session_id>/drawings")
     @app.delete("/api/sessions/<session_id>/drawings/<drawing_id>")
@@ -386,7 +389,7 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             kind = payload.get("kind","horizontal")
             tf = payload.get("timeframe","1h")
             price = float(payload["price"])
-            if kind not in ("horizontal", "trendline", "horizontal_ray", "vertical", "rectangle", "fib", "ghost_feed", "long_position", "short_position") or tf not in TF_MS or not (0 < price < 1e12):
+            if kind not in ("horizontal", "trendline", "polyline", "horizontal_ray", "vertical", "rectangle", "fib", "ghost_feed", "long_position", "short_position") or tf not in TF_MS or not (0 < price < 1e12):
                 raise ValueError("invalid drawing")
             color = payload.get("color","#f0c266")
             if not isinstance(color,str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}",color):
@@ -396,6 +399,10 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             if not (0.01<=ghost_range<=20 and 0<=ghost_variance<=10):
                 raise ValueError("invalid ghost feed parameters")
             start = end = end_price = take_profit = None
+            extend_mode=payload.get("extend_mode","none")
+            if extend_mode not in ("none","left","right","both") or (kind!="trendline" and extend_mode!="none"):
+                raise ValueError("invalid extend mode")
+            points_json=None
             if kind != "horizontal":
                 if TF_MS[tf] < row["base_ms"]:
                     raise ValueError("drawing timeframe is below the dataset interval")
@@ -405,11 +412,30 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                 future_limit = clock + 80 * TF_MS[tf]
                 if not 0 <= start < future_limit:
                     raise ValueError("invalid drawing start")
-                if kind in ("trendline","rectangle","fib","ghost_feed","long_position","short_position"):
+                if kind in ("trendline","polyline","rectangle","fib","ghost_feed","long_position","short_position"):
                     end = int(payload["anchor_end"])
                     end_price = float(payload["end_price"])
                     if not (start < end < future_limit and 0 < end_price < 1e12):
                         raise ValueError("invalid drawing end")
+                if kind=="polyline":
+                    import json
+                    points=payload.get("points")
+                    if not isinstance(points,list) or not 3<=len(points)<=24:
+                        raise ValueError("polyline requires 3–24 points")
+                    normalized=[]
+                    previous=None
+                    for point in points:
+                        if not isinstance(point,dict):raise ValueError("invalid polyline point")
+                        t=int(point["time"]);p=float(point["price"])
+                        if not (0<=t<future_limit and 0<p<1e12) or (previous is not None and t<=previous):
+                            raise ValueError("polyline points must increase in time")
+                        normalized.append({"time":t,"price":p})
+                        previous=t
+                    if normalized[0]["time"]!=start or normalized[-1]["time"]!=end:
+                        raise ValueError("polyline timestamps mismatch")
+                    if abs(normalized[0]["price"]-price)>max(1e-7,price*1e-8) or abs(normalized[-1]["price"]-end_price)>max(1e-7,end_price*1e-8):
+                        raise ValueError("polyline prices mismatch")
+                    points_json=json.dumps(normalized,separators=(',',':'))
                 if kind in ("long_position","short_position"):
                     take_profit = float(payload["take_profit"])
                     valid_levels = (0 < end_price < price < take_profit) if kind == "long_position" else (0 < take_profit < price < end_price)
@@ -421,9 +447,9 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                               (row["dataset_id"],row["cursor"])).fetchone()
         drawing_id = str(uuid.uuid4())
         db().execute("""INSERT INTO drawings
-                     (id,session_id,kind,timeframe,price,created_at_cursor,created_at_ts,anchor_start,anchor_end,end_price,take_profit,color,ghost_range,ghost_variance)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                     (drawing_id,session_id,kind,tf,price,row["cursor"],candle["ts"],start,end,end_price,take_profit,color,ghost_range,ghost_variance))
+                     (id,session_id,kind,timeframe,price,created_at_cursor,created_at_ts,anchor_start,anchor_end,end_price,take_profit,color,ghost_range,ghost_variance,extend_mode,points_json)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     (drawing_id,session_id,kind,tf,price,row["cursor"],candle["ts"],start,end,end_price,take_profit,color,ghost_range,ghost_variance,extend_mode,points_json))
         db().commit()
         return jsonify({"id":drawing_id,"kind":kind,"timeframe":tf,"price":price,
                         "created_at_cursor":row["cursor"]}),201
@@ -449,6 +475,11 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
                     raise ValueError("invalid color")
                 with db():
                     db().execute("UPDATE drawings SET color=? WHERE id=?",(color,drawing_id))
+            if "extend_mode" in payload:
+                extend_mode=payload["extend_mode"]
+                if existing["kind"]!="trendline" or extend_mode not in ("none","left","right","both"):
+                    raise ValueError("invalid extend mode")
+                with db():db().execute("UPDATE drawings SET extend_mode=? WHERE id=?",(extend_mode,drawing_id))
             if not any(k in payload for k in ("price","end_price","anchor_start","anchor_end","take_profit")):
                 return jsonify({"id":drawing_id,"updated_at_cursor":state["cursor"]})
             if existing["kind"] not in ("trendline","rectangle","fib","ghost_feed","long_position","short_position"):

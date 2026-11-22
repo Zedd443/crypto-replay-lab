@@ -353,3 +353,19 @@ test('closed linked Long plan archives box while preserving trade history and op
   await toggle.check();
   await expect(page.locator('.chart-shape-long_position')).toHaveCount(1);
 });
+
+test('completed trade-history markers are opt-in and setting persists on reload',async({page})=>{
+  const toggle=page.getByRole('button',{name:'Show trade history on chart'});
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-pressed','false');
+  await expect(toggle).toContainText('Off');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed','true');
+  await expect(toggle).toContainText('On');
+  await page.reload();
+  await expect(page.getByRole('button',{name:'Show trade history on chart'}))
+    .toHaveAttribute('aria-pressed','true');
+  await page.getByRole('button',{name:'Show trade history on chart'}).click();
+  await expect(page.getByRole('button',{name:'Show trade history on chart'}))
+    .toHaveAttribute('aria-pressed','false');
+});

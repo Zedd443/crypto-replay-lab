@@ -12,7 +12,7 @@ export const DRAWING_TOOLS=[
   {id:'short',label:'Short R:R drawing',icon:'S',key:'S',group:'Paper trading'},
 ];
 const storageKey='crl-drawing-favorites';
-const initialFavorites=['trendline','rectangle','fib','ghost_feed','long','short'];
+const initialFavorites=['horizontal','horizontal_ray','trendline','rectangle','fib','ghost_feed','long','short'];
 
 export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade}){
   const menu=useRef(null);

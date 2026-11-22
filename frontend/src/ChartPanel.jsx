@@ -6,6 +6,7 @@ import ShapeOverlay from './ShapeOverlay.jsx';
 import {calculateIndicator, INDICATORS, INDICATOR_SETTINGS, DEFAULT_INDICATOR_OPTIONS} from './indicators.js';
 import {FIB_LEVELS} from './research.js';
 import {futureSlots} from './ghostScenario.js';
+import {archivedDrawingIds,visibleChartDrawings,visibleTradeMarkers} from './drawingLayers.js';
 
 export default function ChartPanel({ candles, timeframe, sessionId, drawings, drawingMode, onNewLine, onUpdateDrawing, busy, onDrawingMode, onRemoveDrawing, fullscreen, onToggleFullscreen, paperPosition, onAdjustPosition, positionLocked, onTradeShortcut,
   selectedDrawing, onSelectDrawing, orders=[], onSignalSelection }) {
@@ -58,9 +59,12 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const [awaitingEnd,setAwaitingEnd] = React.useState(false);
   const [drawingListOpen,setDrawingListOpen] = React.useState(false);
   const [toolMenu,setToolMenu] = React.useState(false);
+  const [showArchived,setShowArchived]=React.useState(false);
+  const [showClosedMarkers,setShowClosedMarkers]=React.useState(true);
   const hasOpenPosition=paperPosition?.status==='open';
-  const shapes=React.useMemo(()=>drawings.filter(d=>d.timeframe===timeframe &&
-    ['horizontal_ray','vertical','trendline','rectangle','fib','ghost_feed','long_position','short_position'].includes(d.kind)),[drawings,timeframe]);
+  const archived=React.useMemo(()=>archivedDrawingIds(orders),[orders]);
+  const shapes=React.useMemo(()=>visibleChartDrawings(drawings,orders,showArchived).filter(d=>d.timeframe===timeframe &&
+    ['horizontal','horizontal_ray','vertical','trendline','rectangle','fib','ghost_feed','long_position','short_position'].includes(d.kind)),[drawings,orders,timeframe,showArchived]);
   const showToolMenu=open=>{
     setToolMenu(open);
     if(open){setDrawingListOpen(false);setIndicatorMenu(false);}
@@ -352,7 +356,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     if(!series)return;
     for(const line of drawingPriceLabelsRef.current)series.removePriceLine(line);
     const selected=drawings.find(d=>d.id===selectedDrawing);
-    const visible=drawings.filter(d=>d.timeframe===timeframe).slice(-25);
+    const visible=visibleChartDrawings(drawings,orders,showArchived).filter(d=>d.timeframe===timeframe).slice(-25);
     const levels=[];
     for(const d of visible){
       if(!Number.isFinite(d.price))continue;
@@ -374,13 +378,13 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     }));
     return()=>{for(const line of drawingPriceLabelsRef.current)series.removePriceLine(line);
       drawingPriceLabelsRef.current=[];};
-  },[drawings,timeframe,selectedDrawing]);
+  },[drawings,orders,timeframe,selectedDrawing,showArchived]);
 
   useEffect(()=>{
     const series=indicatorMarkers.current;
     if(!series)return;
     const bars=new Set(candles.map(c=>c.time/1000));
-    const tradeMarkers=orders.flatMap(order=>{
+    const tradeMarkers=visibleTradeMarkers(orders,showClosedMarkers).flatMap(order=>{
       const direction=order.side==='long';
       const output=[];
       if(order.entry_ms!=null){
@@ -403,7 +407,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     });
     const indicators=activeIndicators.flatMap(item=>item.markers||[]);
     series.setMarkers([...indicators,...tradeMarkers].sort((a,b)=>a.time-b.time));
-  },[activeIndicators,orders,candles,timeframe]);
+  },[activeIndicators,orders,candles,timeframe,showClosedMarkers]);
 
   useEffect(()=>{
     const chart=chartRef.current;
@@ -454,7 +458,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
 
   return <div className="chart-frame">
     <div ref={rootRef} className="chart-area" aria-label="Interactive replay candlestick chart" />
-    {paperPosition&&<BracketOverlay key={paperPosition.id} position={paperPosition} chart={chartRef}
+    {paperPosition?.status==='open'&&<BracketOverlay key={paperPosition.id} position={paperPosition} chart={chartRef}
       series={candleSeriesRef} candles={candles} disabled={positionLocked||paperPosition.status!=='open'}
       onAdjust={onAdjustPosition}/>}
     {(shapes.length>0||draftShape)&&<ShapeOverlay chart={chartRef} series={candleSeriesRef}
@@ -495,12 +499,17 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       {['rectangle','fib','ghost_feed','long_position','short_position'].includes(drawingMode)&&
         <span role="status">Drag to draw · tap to place Long/Short · Esc to cancel</span>}
       {drawingListOpen&&<section id="chart-drawing-list" className="chart-drawing-list" aria-label="Saved drawings">
+        <div className="drawing-layer-controls">
+          <label><input type="checkbox" checked={showArchived} onChange={e=>setShowArchived(e.target.checked)}/> Show archived plans ({archived.size})</label>
+          <label><input type="checkbox" checked={showClosedMarkers} onChange={e=>setShowClosedMarkers(e.target.checked)}/> Show closed-trade markers</label>
+        </div>
         {drawings.length===0?<p>No drawings at this cursor</p>:<>
           <ul>{drawings.map(d=>{
             const label=(DRAWING_TOOLS.find(tool=>tool.id===d.kind)?.label||d.kind)+' '+d.timeframe+' / '+d.price.toLocaleString();
-            return <li key={d.id}>
+            return <li key={d.id} className={archived.has(d.id)?'drawing-archived':''}>
               <button aria-pressed={selectedDrawing===d.id}
                 onClick={()=>setSelectedDrawing(selectedDrawing===d.id?null:d.id)}>{label}</button>
+              {archived.has(d.id)&&<span className="drawing-archived-label">Archived</span>}
               <button aria-label={'Delete '+label} disabled={busy}
                 onClick={()=>onRemoveDrawing(d.id)}>Delete</button>
             </li>;

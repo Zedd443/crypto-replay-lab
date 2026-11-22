@@ -33,13 +33,13 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
           const y1=s.priceToCoordinate(d.price);
           const y2=d.end_price!=null?s.priceToCoordinate(d.end_price):null;
           const tp=isPosition(d.kind)?s.priceToCoordinate(d.take_profit):null;
-          const good=x1!=null && (d.kind==='vertical'||y1!=null) &&
+          const good=(d.kind==='horizontal'||x1!=null) && (d.kind==='vertical'||y1!=null) &&
             (!['rectangle','fib','trendline','ghost_feed','long_position','short_position'].includes(d.kind)||(x2!=null&&y2!=null)) &&
             (!isPosition(d.kind)||tp!=null);
           el.style.visibility=good?'visible':'hidden';
           if(!good)continue;
-          const left=x2==null?x1:Math.min(x1,x2);
-          const right=x2==null?x1:Math.max(x1,x2);
+          const left=d.kind==='horizontal'?0:x2==null?x1:Math.min(x1,x2);
+          const right=d.kind==='horizontal'?scale.width():x2==null?x1:Math.max(x1,x2);
           const top=d.kind==='vertical'?0:isPosition(d.kind)?Math.min(y1,y2,tp):Math.min(y1,y2??y1);
           const bottom=d.kind==='vertical'?bounds.height:isPosition(d.kind)?Math.max(y1,y2,tp):Math.max(y1,y2??y1);
           el.style.transform='translate('+left+'px,'+top+'px)';
@@ -194,6 +194,8 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
               part==='stop'?'SL':'TP'}</div>)}
         </>}
         {d.kind==='trendline'&&<span className="trendline-segment" data-handle="move"/>}
+        {d.kind==='horizontal'&&<span className="horizontal-line-hit" title="Horizontal support/resistance level"/>}
+        {d.kind==='horizontal_ray'&&<span className="horizontal-ray-hit" title="Horizontal ray"/>}
         {d.kind==='ghost_feed'&&<>
           <span className="ghost-feed-select" title="Select, drag, or press Delete to remove Ghost Feed">GHOST FEED</span>
           <div className="ghost-feed-candles" aria-label="Hypothetical Ghost Feed candles">

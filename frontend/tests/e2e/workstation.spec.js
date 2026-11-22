@@ -269,5 +269,9 @@ test('rewind audit prevents creating scored hypotheses from known future',async(
   // must then be hidden to prevent future knowledge from appearing on screen.
   if(state.cursor<initialLockCursor)expect(after.items).toHaveLength(0);
   else expect(after.items).toHaveLength(1);
-  await expect(page.locator('.assessment-form button[type="submit"]')).toBeDisabled();
+  // Rewinding before the drawing creation removes the form's submit button
+  // altogether; rewinding only before its lock keeps a disabled button.
+  const submit=page.locator('.assessment-form button[type="submit"]');
+  if(await submit.count())await expect(submit).toBeDisabled();
+  else await expect(page.getByLabel('Assessment drawing')).toHaveValue('');
 });

@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS ix_drawing_assessments_session
  ON drawing_assessments(session_id,locked_cursor);
 """
 
-INTENTS={"bounce_up","bounce_down","break_up","break_down","rr_plan"}
+INTENTS={"bounce_up","bounce_down","break_up","break_down","rr_plan","structural_only"}
 ZONE_KINDS={"rectangle","horizontal","horizontal_ray"}
 
 def _roundup(time_ms,tf):
@@ -78,6 +78,10 @@ def evaluate(locked,bars):
       "status":"PENDING","trigger_bar":None,"outcome_bar":None,
       "mfe_pct":None,"mae_pct":None,
       "reason":"Waiting for completed candles after the hypothesis lock"}
+    if mode=="structural_only":
+        response["status"]="STRUCTURE_ONLY"
+        response["reason"]="Rule-based anchor review at lock; no directional hypothesis or accuracy claim"
+        return response
     if not observed:return response
     up=mode in {"bounce_up","break_up"} or d["kind"]=="long_position"
     direction=1 if up else -1
@@ -214,7 +218,11 @@ def register(app,db,session_row,snapshot):
             return jsonify({"error":"Position plans require rr_plan"}),400
         if kind not in ("long_position","short_position") and intent=="rr_plan":
             return jsonify({"error":"rr_plan requires a Long/Short drawing"}),400
-        if intent!="rr_plan" and kind not in ZONE_KINDS:
+        if intent=="structural_only" and kind not in ("trendline","fib"):
+            return jsonify({"error":"Structural-only review requires trendline or Fibonacci"}),400
+        if kind in ("trendline","fib") and intent!="structural_only":
+            return jsonify({"error":"Trendline/Fibonacci require structural-only review"}),400
+        if intent not in ("rr_plan","structural_only") and kind not in ZONE_KINDS:
             return jsonify({"error":"Directional hypotheses require a rectangle or horizontal zone"}),400
         try:
             horizon=int(payload.get("horizon",20))

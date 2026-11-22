@@ -99,3 +99,23 @@ def test_lock_rejects_synthetic_future_drawing_and_wrong_hypothesis(tmp_path):
         "anchor_end":state["clock_ms"]+60000}).get_json()
     assert client.post(base+"/assessments",json={"drawing_id":future["id"],
         "intent":"bounce_up"}).status_code==400
+
+def test_fibonacci_structural_annotation_not_counted_as_directional_accuracy(tmp_path):
+    client=create_app(tmp_path/"fib-review.sqlite3").test_client()
+    state=client.post("/api/sessions",json={"cursor":300}).get_json()
+    base=f"/api/sessions/{state['id']}"
+    clock=state["clock_ms"]
+    create=client.post(base+"/drawings",json={
+        "kind":"fib","timeframe":"1m","price":100,"end_price":105,
+        "anchor_start":clock-180000,"anchor_end":clock-60000
+    })
+    assert create.status_code==201,create.get_json()
+    did=create.get_json()["id"]
+    post=client.post(base+"/assessments",json={
+        "drawing_id":did,"intent":"structural_only","horizon":20
+    })
+    assert post.status_code==201,post.get_json()
+    output=client.get(base+"/assessments").get_json()
+    assert output["items"][0]["status"]=="STRUCTURE_ONLY"
+    assert output["summary"]["accuracy_pct"] is None
+    assert output["summary"]["pending"]==0

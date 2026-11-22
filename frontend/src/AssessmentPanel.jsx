@@ -2,7 +2,8 @@ import React,{useCallback,useEffect,useMemo,useState} from 'react';
 
 const ZONES=new Set(['rectangle','horizontal','horizontal_ray']);
 const PLANS=new Set(['long_position','short_position']);
-const canAssess=d=>d&&(ZONES.has(d.kind)||PLANS.has(d.kind));
+const STRUCTURAL=new Set(['trendline','fib']);
+const canAssess=d=>d&&(ZONES.has(d.kind)||PLANS.has(d.kind)||STRUCTURAL.has(d.kind));
 const fmt=(x,n=2)=>x==null||!Number.isFinite(Number(x))?'—':Number(x).toFixed(n);
 
 export default function AssessmentPanel({session,timeframe,drawings=[],selectedDrawing,onSelectDrawing,isDemo}){
@@ -23,6 +24,7 @@ export default function AssessmentPanel({session,timeframe,drawings=[],selectedD
     selectedDrawing:(selected&&eligible.some(x=>x.id===selected)?selected:eligible.at(-1)?.id||'');
   const drawing=eligible.find(x=>x.id===drawingId);
   const isPlan=PLANS.has(drawing?.kind);
+  const isStructure=STRUCTURAL.has(drawing?.kind);
   const existing=items.find(x=>x.drawing_id===drawingId);
   const request=useCallback(async(url,options)=>{
     const response=await fetch(url,options);
@@ -58,7 +60,7 @@ export default function AssessmentPanel({session,timeframe,drawings=[],selectedD
       const result=await request(base+'/assessments',{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
-          drawing_id:drawingId,intent:isPlan?'rr_plan':intent,
+          drawing_id:drawingId,intent:isPlan?'rr_plan':isStructure?'structural_only':intent,
           horizon:Number(horizon),target_pct:Number(target),stop_pct:Number(stop)
         })
       });
@@ -105,9 +107,10 @@ export default function AssessmentPanel({session,timeframe,drawings=[],selectedD
         </label>
         {drawing&&<>
           <label>Hypothesis
-            <select aria-label="Assessment hypothesis" value={isPlan?'rr_plan':intent}
-              disabled={isPlan} onChange={e=>setIntent(e.target.value)}>
-              {isPlan?<option value="rr_plan">{drawing.kind==='long_position'?'Long':'Short'} TP before SL</option>:<>
+            <select aria-label="Assessment hypothesis" value={isPlan?'rr_plan':isStructure?'structural_only':intent}
+              disabled={isPlan||isStructure} onChange={e=>setIntent(e.target.value)}>
+              {isPlan?<option value="rr_plan">{drawing.kind==='long_position'?'Long':'Short'} TP before SL</option>:
+              isStructure?<option value="structural_only">Structural anchor review (no directional accuracy)</option>:<>
                 <option value="bounce_up">Support bounce upward</option>
                 <option value="bounce_down">Resistance rejection downward</option>
                 <option value="break_up">Bullish breakout continuation</option>
@@ -119,7 +122,7 @@ export default function AssessmentPanel({session,timeframe,drawings=[],selectedD
             <input aria-label="Assessment horizon" type="number" min="1" max="200" step="1"
               value={horizon} onChange={e=>setHorizon(e.target.value)}/>
           </label>
-          {!isPlan&&<div className="assessment-targets">
+          {!isPlan&&!isStructure&&<div className="assessment-targets">
             <label>Target %
               <input aria-label="Assessment target percent" type="number" min=".01" max="50" step=".1"
                 value={target} onChange={e=>setTarget(e.target.value)}/>
@@ -129,6 +132,7 @@ export default function AssessmentPanel({session,timeframe,drawings=[],selectedD
                 value={stop} onChange={e=>setStop(e.target.value)}/>
             </label>
           </div>}
+          {isStructure&&<p className="assessment-note">The two price anchors are compared with confirmed pivots at lock. No future candle can turn this into a success/failure claim.</p>}
           {isPlan&&<p className="assessment-note">Use frozen drawing Entry, TP, and SL. An assessment
             does not execute a paper trade.</p>}
           <button type="submit" disabled={!drawing||busy||Boolean(existing)||

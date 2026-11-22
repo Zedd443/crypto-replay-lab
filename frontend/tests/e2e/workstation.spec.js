@@ -258,11 +258,16 @@ test('rewind audit prevents creating scored hypotheses from known future',async(
   await page.getByRole('button',{name:'Drawing assessments'}).click();
   await page.getByRole('button',{name:'Lock hypothesis'}).click();
   await expect(page.getByText(/Hypothesis locked at cursor/)).toBeVisible();
+  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
+  const initialLockCursor=(await (await page.request.get('/api/sessions/'+sid+'/assessments')).json()).items[0].locked_cursor;
   await page.getByRole('button',{name:'+1 ▶'}).click();
   await page.getByRole('button',{name:'◀ −1'}).click();
   await expect(page.getByText(/Rewind audit: this session/)).toBeVisible();
-  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
-  const items=(await (await page.request.get('/api/sessions/'+sid+'/assessments')).json()).items;
-  expect(items).toHaveLength(1);
-  await expect(page.getByRole('button',{name:'Already locked'})).toBeDisabled();
+  const state=(await (await page.request.get('/api/sessions/'+sid)).json());
+  const after=(await (await page.request.get('/api/sessions/'+sid+'/assessments')).json());
+  // A TF step backwards may land before the original lock cursor. That lock
+  // must then be hidden to prevent future knowledge from appearing on screen.
+  if(state.cursor<initialLockCursor)expect(after.items).toHaveLength(0);
+  else expect(after.items).toHaveLength(1);
+  await expect(page.locator('.assessment-form button[type="submit"]')).toBeDisabled();
 });

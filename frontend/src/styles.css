@@ -473,3 +473,17 @@ button.accent:hover:not(:disabled){background:#348cf5}
  .drawing-favorites button{width:28px;min-width:28px;height:28px;padding:5px}
  .drawing-favorites .tool-icon{width:16px;height:16px}}
 @media(prefers-reduced-motion:reduce){.chart-frame button,.drawing-tool-menu button{transition:none!important}}
+
+/* Completed trades belong in the order journal; their chart markers are opt-in. */
+.chart-history-toggle{display:inline-flex;align-items:center;gap:6px;border-radius:8px;
+  color:#a9c8de!important;background:#15293eeb!important;border:1px solid #3e5a74!important;
+  padding:6px 9px!important;font-weight:600;line-height:1}
+.chart-history-toggle.active{color:#a2ebda!important;border-color:#348e87!important;
+  background:#1e4c4d!important}
+.chart-history-toggle svg{flex:0 0 auto;opacity:.85}
+.chart-history-toggle:hover{color:#e4f6ff!important;border-color:#6eb4d6!important}
+.assessment-progress{height:5px;width:100%;background:#253951;border-radius:999px;
+  margin:10px 0;overflow:hidden}
+.assessment-progress span{height:100%;display:block;border-radius:inherit;background:#5bc4cd;
+  transition:width .18s ease}
+@media(prefers-reduced-motion:reduce){.assessment-progress span{transition:none}}

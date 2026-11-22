@@ -119,3 +119,21 @@ def test_fibonacci_structural_annotation_not_counted_as_directional_accuracy(tmp
     assert output["items"][0]["status"]=="STRUCTURE_ONLY"
     assert output["summary"]["accuracy_pct"] is None
     assert output["summary"]["pending"]==0
+
+def test_pending_assessment_reports_trigger_and_progress():
+    case=locked(horizon=20)
+    not_touch=[bar(i,105,106,104,105) for i in range(9)]
+    waiting=evaluate(case,not_touch)
+    assert waiting["status"]=="PENDING"
+    assert waiting["trigger_bar"] is None
+    assert "9/20" in waiting["reason"]
+    hit=bar(10,102,102.5,100,101.5)
+    activated=evaluate(case,[*not_touch,hit])
+    assert activated["status"]=="PENDING"
+    assert activated["trigger_bar"]==10
+    assert "Triggered" in activated["reason"]
+    next_bar=bar(11,101.5,101.8,101,101.4)
+    ongoing=evaluate(case,[*not_touch,hit,next_bar])
+    assert ongoing["status"]=="PENDING"
+    assert ongoing["trigger_bar"]==10
+    assert "9 bars remain" in ongoing["reason"]

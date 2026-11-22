@@ -172,8 +172,14 @@ export default function AssessmentPanel({session,timeframe,drawings=[],selectedD
         </div>
         <div className="assessment-result-meta">
           <span>{x.observed}/{x.horizon} completed bars</span>
+          {x.trigger_bar!=null&&<span>Triggered at +{x.trigger_bar}</span>}
+          {x.status==='PENDING'&&<span>{x.horizon-x.observed} remaining</span>}
           <span>Structure: {x.structure.status}</span>
           <span>{x.timeframe.toUpperCase()}</span>
+        </div>
+        <div className="assessment-progress" role="progressbar" aria-label="Assessment progress"
+          aria-valuenow={x.observed} aria-valuemin={0} aria-valuemax={x.horizon}>
+          <span style={{width:Math.min(100,100*x.observed/x.horizon)+'%'}}/>
         </div>
         <p>{x.reason}</p>
         <small>{x.structure.reason}</small>

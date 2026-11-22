@@ -64,7 +64,17 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const [drawingListOpen,setDrawingListOpen] = React.useState(false);
   const [toolMenu,setToolMenu] = React.useState(false);
   const [showArchived,setShowArchived]=React.useState(false);
-  const [showClosedMarkers,setShowClosedMarkers]=React.useState(true);
+  const [showClosedMarkers,setShowClosedMarkers]=React.useState(()=>{
+    try{return localStorage.getItem('crl-show-closed-trades')==='true';}
+    catch{return false;}
+  });
+  const toggleClosedHistory=()=>{
+    setShowClosedMarkers(previous=>{
+      const next=!previous;
+      try{localStorage.setItem('crl-show-closed-trades',String(next));}catch{/* unavailable */}
+      return next;
+    });
+  };
   const hasOpenPosition=paperPosition?.status==='open';
   const archived=React.useMemo(()=>archivedDrawingIds(orders),[orders]);
   const shapes=React.useMemo(()=>visibleChartDrawings(drawings,orders,showArchived).filter(d=>d.timeframe===timeframe &&
@@ -430,7 +440,8 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
         if(target&&bars.has(target.time/1000))output.push({
           time:target.time/1000,position:direction?'belowBar':'aboveBar',
           color:direction?'#45d5b1':'#ff8b93',shape:direction?'arrowUp':'arrowDown',
-          text:(direction?'LONG':'SHORT')+' '+order.entry_price.toFixed(2)
+          text:(order.status==='closed'?(direction?'L':'S'):(direction?'LONG':'SHORT'))+
+            ' '+order.entry_price.toFixed(2)
         });
       }
       if(order.exit_ms!=null&&order.status==='closed'){
@@ -507,6 +518,16 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     <DrawingTools open={toolMenu} onOpen={showToolMenu} mode={drawingMode}
       disabled={busy||!sessionId} onSelect={onDrawingMode} onTrade={onTradeShortcut}/>
     <div className="chart-drawing-tools" aria-label="Chart options">
+      <button type="button" className={'chart-history-toggle'+(showClosedMarkers?' active':'')}
+        aria-pressed={showClosedMarkers} aria-label="Show trade history on chart"
+        title={showClosedMarkers?'Hide completed trade entry/exit markers':'Show completed trade entry/exit markers'}
+        onClick={toggleClosedHistory}>
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor"
+          strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 12a8 8 0 1 0 2-5.3M4 4v4h4M12 7v5l3 2"/>
+        </svg>
+        Trade history {showClosedMarkers?'On':'Off'}
+      </button>
       <button aria-expanded={drawingListOpen} aria-controls="chart-drawing-list"
         disabled={!sessionId} onClick={()=>{setDrawingListOpen(open=>!open);setIndicatorMenu(false);setToolMenu(false);}}>
         Drawings ({drawings.length})
@@ -541,7 +562,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       {drawingListOpen&&<section id="chart-drawing-list" className="chart-drawing-list" aria-label="Saved drawings">
         <div className="drawing-layer-controls">
           <label><input type="checkbox" checked={showArchived} onChange={e=>setShowArchived(e.target.checked)}/> Show archived plans ({archived.size})</label>
-          <label><input type="checkbox" checked={showClosedMarkers} onChange={e=>setShowClosedMarkers(e.target.checked)}/> Show closed-trade markers</label>
+          <label><input type="checkbox" checked={showClosedMarkers} onChange={toggleClosedHistory}/> Show trade history markers (entry + exit)</label>
         </div>
         {drawings.length===0?<p>No drawings at this cursor</p>:<>
           <ul>{drawings.map(d=>{

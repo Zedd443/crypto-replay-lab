@@ -1,6 +1,7 @@
 import React,{useMemo,useState} from 'react';
 import {analyzeDrawings,evaluateTrades,structureSnapshot} from './research.js';
 import SignalLab from './SignalLab.jsx';
+import AssessmentPanel from './AssessmentPanel.jsx';
 
 const fmt=v=>v==null||!Number.isFinite(v)?'—':v.toLocaleString(undefined,{maximumFractionDigits:3});
 const pct=v=>v==null?'—':v.toFixed(1)+'%';
@@ -13,7 +14,7 @@ function Sparkline({values}){
     <polyline fill="none" stroke={values.at(-1)>=0?'#3acaa6':'#ee8486'} strokeWidth="2.4" points={points}/>
   </svg>;
 }
-export default function ResearchPanel({orders,drawings,candles,session,timeframe,isDemo,activeSignal}){
+export default function ResearchPanel({orders,drawings,candles,session,timeframe,isDemo,activeSignal,selectedDrawing,onSelectDrawing}){
   const [tab,setTab]=useState('trades');
   const result=useMemo(()=>evaluateTrades(orders),[orders]);
   const readings=useMemo(()=>analyzeDrawings(drawings,candles),[drawings,candles]);
@@ -24,9 +25,11 @@ export default function ResearchPanel({orders,drawings,candles,session,timeframe
       <button className={tab==='trades'?'active':''} onClick={()=>setTab('trades')}>Trade analytics</button>
       <button className={tab==='patterns'?'active':''} onClick={()=>setTab('patterns')}>Drawing & pattern reader</button>
       <button className={tab==='signals'?'active':''} onClick={()=>setTab('signals')}>Signal backtest</button>
+      <button className={tab==='assessments'?'active':''} onClick={()=>setTab('assessments')}>Drawing assessments</button>
       <span className="muted">Session only · {session?.contaminated?'rewind contaminated':'replay-visible'}</span>
     </div>
-    {tab==='signals'?<SignalLab candles={candles} timeframe={timeframe} isDemo={isDemo}
+    {tab==='assessments'?<AssessmentPanel session={session} timeframe={timeframe} drawings={drawings}
+      selectedDrawing={selectedDrawing} onSelectDrawing={onSelectDrawing} isDemo={isDemo}/>:tab==='signals'?<SignalLab candles={candles} timeframe={timeframe} isDemo={isDemo}
       activeSignal={activeSignal}/>:tab==='trades'?<>
       <div className="metrics-grid">
         <div><small>Closed trades</small><strong>{result.count}</strong></div>

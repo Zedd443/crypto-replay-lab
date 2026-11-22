@@ -34,23 +34,44 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
           const y2=d.end_price!=null?s.priceToCoordinate(d.end_price):null;
           const tp=isPosition(d.kind)?s.priceToCoordinate(d.take_profit):null;
           const good=(d.kind==='horizontal'||x1!=null) && (d.kind==='vertical'||y1!=null) &&
-            (!['rectangle','fib','trendline','ghost_feed','long_position','short_position'].includes(d.kind)||(x2!=null&&y2!=null)) &&
+            (!['rectangle','fib','trendline','polyline','ghost_feed','long_position','short_position'].includes(d.kind)||(x2!=null&&y2!=null)) &&
             (!isPosition(d.kind)||tp!=null);
           el.style.visibility=good?'visible':'hidden';
           if(!good)continue;
-          const left=d.kind==='horizontal'?0:x2==null?x1:Math.min(x1,x2);
-          const right=d.kind==='horizontal'?scale.width():x2==null?x1:Math.max(x1,x2);
-          const top=d.kind==='vertical'?0:isPosition(d.kind)?Math.min(y1,y2,tp):Math.min(y1,y2??y1);
-          const bottom=d.kind==='vertical'?bounds.height:isPosition(d.kind)?Math.max(y1,y2,tp):Math.max(y1,y2??y1);
+          const fullWidth=d.kind==='horizontal'||d.kind==='trendline'||d.kind==='polyline';
+          const left=fullWidth?0:x2==null?x1:Math.min(x1,x2);
+          const right=fullWidth?scale.width():x2==null?x1:Math.max(x1,x2);
+          const fullHeight=d.kind==='vertical'||d.kind==='trendline'||d.kind==='polyline';
+          const top=fullHeight?0:isPosition(d.kind)?Math.min(y1,y2,tp):Math.min(y1,y2??y1);
+          const bottom=fullHeight?bounds.height:isPosition(d.kind)?Math.max(y1,y2,tp):Math.max(y1,y2??y1);
           el.style.transform='translate('+left+'px,'+top+'px)';
           el.style.width=(d.kind==='horizontal_ray'?Math.max(0,scale.width()-x1):Math.max(1,right-left))+'px';
           el.style.height=Math.max(1,bottom-top)+'px';
           if(d.kind==='trendline'){
             const line=el.querySelector('.trendline-segment');
             if(line){
-              const ax=x1-left,ay=y1-top,bx=x2-left,by=y2-top;
+              const mode=d.extend_mode||'none',dx=x2-x1;
+              const ax=(mode==='left'||mode==='both')&&dx?0:x1;
+              const bx=(mode==='right'||mode==='both')&&dx?scale.width():x2;
+              const slope=dx?(y2-y1)/dx:0;
+              const ay=y1+(ax-x1)*slope,by=y1+(bx-x1)*slope;
               line.style.width=Math.hypot(bx-ax,by-ay)+'px';
               line.style.transform='translate('+ax+'px,'+ay+'px) rotate('+Math.atan2(by-ay,bx-ax)+'rad)';
+              for(const [handle,x,y] of [['start',x1,y1],['end',x2,y2]]){
+                const h=el.querySelector('[data-handle="'+handle+'"]');
+                if(h){h.style.left=x+'px';h.style.top=y+'px';}
+              }
+            }
+          }
+          if(d.kind==='polyline'){
+            const path=el.querySelector('[data-polyline-path]');
+            if(path&&d.points?.length>=2){
+              path.setAttribute('points',d.points.map(p=>{
+                const x=scale.timeToCoordinate(p.time/1000),y=s.priceToCoordinate(p.price);
+                return x==null||y==null?'':x+','+y;
+              }).filter(Boolean).join(' '));
+              const svg=el.querySelector('.polyline-drawing');
+              if(svg)svg.setAttribute('viewBox','0 0 '+scale.width()+' '+bounds.height);
             }
           }
           if(d.kind==='ghost_feed'){
@@ -147,7 +168,11 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
   const down=event=>{
     const el=event.target.closest('[data-drawing-id]');
     const d=drawings.find(item=>item.id===el?.dataset.drawingId);
-    if(!d||disabled||event.button!==0||!editable(d.kind))return;
+    if(!d||event.button!==0)return;
+    if(!editable(d.kind)){
+      event.preventDefault();event.stopPropagation();onSelect?.(d.id);return;
+    }
+    if(disabled)return;
     event.preventDefault();event.stopPropagation();
     onSelect?.(d.id);
     el.setPointerCapture(event.pointerId);
@@ -194,6 +219,10 @@ export default function ShapeOverlay({chart,series,drawings,selected,onSelect,on
               part==='stop'?'SL':'TP'}</div>)}
         </>}
         {d.kind==='trendline'&&<span className="trendline-segment" data-handle="move"/>}
+        {d.kind==='polyline'&&<svg className="polyline-drawing" aria-label="Multi-point trendline" preserveAspectRatio="none">
+          <polyline data-polyline-path="" fill="none" stroke="var(--drawing-color,#f0c266)"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>}
         {d.kind==='horizontal'&&<span className="horizontal-line-hit" title="Horizontal support/resistance level"/>}
         {d.kind==='horizontal_ray'&&<span className="horizontal-ray-hit" title="Horizontal ray"/>}
         {d.kind==='ghost_feed'&&<>

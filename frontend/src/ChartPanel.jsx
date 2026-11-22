@@ -55,6 +55,10 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     return [...previous.filter(value=>kind!=='pane'||!paneIds.includes(value)),id];
   });
   const firstAnchor = useRef(null);
+  const polyPoints = useRef([]);
+  const [polyCount,setPolyCount]=React.useState(0);
+  const finishPolyline=useRef(null);
+  const cancelPolyline=useRef(null);
   const busyRef = useRef(busy);
   const [awaitingEnd,setAwaitingEnd] = React.useState(false);
   const [drawingListOpen,setDrawingListOpen] = React.useState(false);
@@ -64,7 +68,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   const hasOpenPosition=paperPosition?.status==='open';
   const archived=React.useMemo(()=>archivedDrawingIds(orders),[orders]);
   const shapes=React.useMemo(()=>visibleChartDrawings(drawings,orders,showArchived).filter(d=>d.timeframe===timeframe &&
-    ['horizontal','horizontal_ray','vertical','trendline','rectangle','fib','ghost_feed','long_position','short_position'].includes(d.kind)),[drawings,orders,timeframe,showArchived]);
+    ['horizontal','horizontal_ray','vertical','trendline','polyline','rectangle','fib','ghost_feed','long_position','short_position'].includes(d.kind)),[drawings,orders,timeframe,showArchived]);
   const showToolMenu=open=>{
     setToolMenu(open);
     if(open){setDrawingListOpen(false);setIndicatorMenu(false);}
@@ -84,8 +88,14 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
       if(el?.closest?.('input,textarea,select,[contenteditable="true"]')||
         event.ctrlKey||event.metaKey||event.altKey)return;
       if(event.key==='Escape'){
+        if(drawingModeRef.current==='polyline'){
+          cancelPolyline.current?.();event.preventDefault();return;
+        }
         if(selectedDrawing){setSelectedDrawing(null);event.preventDefault();}
         return;
+      }
+      if(event.key==='Enter'&&drawingModeRef.current==='polyline'&&polyPoints.current.length>=3){
+        event.preventDefault();finishPolyline.current?.();return;
       }
       if(['Delete','Backspace'].includes(event.key)&&selectedDrawing&&!busy){
         event.preventDefault();onRemoveDrawing?.(selectedDrawing);
@@ -97,6 +107,8 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
   },[selectedDrawing,busy,onRemoveDrawing,onSelectDrawing]);
   const resetAnchor = () => {
     firstAnchor.current = null;
+    polyPoints.current=[];
+    setPolyCount(0);
     setAwaitingEnd(false);
   };
 
@@ -105,6 +117,14 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     setDraftShape(null);
   }, [drawingMode, timeframe, sessionId]);
   drawingModeRef.current = drawingMode;
+  cancelPolyline.current=()=>{polyPoints.current=[];setPolyCount(0);setDraftShape(null);setAwaitingEnd(false);};
+  finishPolyline.current=()=>{
+    const points=polyPoints.current;
+    if(points.length<3)return;
+    onNewLineRef.current?.({kind:'polyline',price:points[0].price,end_price:points.at(-1).price,
+      anchor_start:points[0].time,anchor_end:points.at(-1).time,points});
+    cancelPolyline.current?.();
+  };
   onNewLineRef.current = drawing=>{
     onNewLine?.({...drawing,color:drawingColor,
       ...(drawing.kind==='ghost_feed'?{ghost_range:ghostRange,ghost_variance:ghostVariance}:{})});
@@ -179,7 +199,11 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const onPointerMove=event=>{
       const p=point(event);
       if(!dragStart){
-        if(firstAnchor.current&&p&&['trendline','rectangle','fib','ghost_feed'].includes(drawingModeRef.current))
+        if(drawingModeRef.current==='polyline'&&polyPoints.current.length&&p){
+          const all=[...polyPoints.current,p];
+          setDraftShape({id:'draft',kind:'polyline',price:all[0].price,end_price:all.at(-1).price,
+            anchor_start:all[0].time,anchor_end:all.at(-1).time,points:all});
+        }else if(firstAnchor.current&&p&&['trendline','rectangle','fib','ghost_feed'].includes(drawingModeRef.current))
           setDraftShape(makeDraft(firstAnchor.current,p,drawingModeRef.current));
         return;
       }
@@ -245,6 +269,13 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
         onNewLineRef.current({kind,price,anchor_start:anchor.time});
         return;
       }
+      if(kind==='polyline'){
+        const points=polyPoints.current;
+        if(points.length && anchor.time<=points.at(-1).time)return;
+        polyPoints.current=[...points,anchor];setPolyCount(polyPoints.current.length);
+        setAwaitingEnd(true);
+        return;
+      }
       if (!firstAnchor.current) {
         firstAnchor.current = anchor;
         setAwaitingEnd(true);
@@ -265,12 +296,19 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     pane?.addEventListener('pointerup',onPointerUp,true);
     pane?.addEventListener('pointercancel',onPointerUp,true);
     pane?.addEventListener('click',onClick);
+    const onDoubleClick=event=>{
+      if(drawingModeRef.current==='polyline'&&polyPoints.current.length>=3){
+        event.preventDefault();event.stopPropagation();finishPolyline.current?.();
+      }
+    };
+    pane?.addEventListener('dblclick',onDoubleClick);
     return () => {
       pane?.removeEventListener('pointerdown',onPointerDown,true);
       pane?.removeEventListener('pointermove',onPointerMove,true);
       pane?.removeEventListener('pointerup',onPointerUp,true);
       pane?.removeEventListener('pointercancel',onPointerUp,true);
       pane?.removeEventListener('click',onClick);
+      pane?.removeEventListener('dblclick',onDoubleClick);
       indicatorMarkers.current?.detach();
       indicatorMarkers.current=null;
       indicatorSeries.current.clear();
@@ -341,7 +379,7 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     const chart=chartRef.current;
     for (const line of trendlinesRef.current) chart.removeSeries(line);
     const times = new Set(candles.map(c=>c.time));
-    trendlinesRef.current=drawings.filter(d=>d.kind==='trendline' && d.timeframe===timeframe &&
+    trendlinesRef.current=drawings.filter(d=>d.kind==='trendline' && d.timeframe===timeframe && (d.extend_mode||'none')==='none' &&
       times.has(d.anchor_start) && times.has(d.anchor_end)).map(d=>{
       const line=chart.addSeries(LineSeries,{color:d.color||'#f0c266',lineWidth:2,
         priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
@@ -488,7 +526,9 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
         </div>)}
         <p>Indicators are research aids, not validated buy/sell signals.</p>
       </section>}
-      {awaitingEnd&&<span role="status">Move cursor to preview · click second point · Esc to cancel</span>}
+      {awaitingEnd&&<span role="status">{drawingMode==='polyline'?
+        polyCount+' points · Add points · Enter/double-click to finish (minimum 3) · Esc to cancel':
+        'Move cursor to preview · click second point · Esc to cancel'}</span>}
       {draftShape?.kind&&<span className="draft-measure" role="status">
         {Math.abs(draftShape.end_price-draftShape.price).toFixed(3)} Δ ·
         {(100*(draftShape.end_price/draftShape.price-1)).toFixed(2)}% ·
@@ -524,6 +564,13 @@ export default function ChartPanel({ candles, timeframe, sessionId, drawings, dr
     <div className="drawing-color-control" title="Default drawing color or selected drawing color">
       <label>{chosen?'Selected color':'Drawing color'} <input aria-label="Drawing color"
         type="color" value={chosen?.color||drawingColor} onChange={e=>chooseColor(e.target.value)}/></label>
+      {chosen?.kind==='trendline'&&<label className="trend-extend-control">Extend
+        <select aria-label="Trendline extend mode" value={chosen.extend_mode||'none'}
+          disabled={busy||positionLocked}
+          onChange={e=>onUpdateDrawing(chosen.id,{extend_mode:e.target.value})}>
+          <option value="none">Segment</option><option value="left">Left</option>
+          <option value="right">Right</option><option value="both">Both</option>
+        </select></label>}
       {chosen&&<button onClick={()=>setSelectedDrawing(null)}>Deselect</button>}
     </div>
     {drawingMode==='ghost_feed'&&<div className="ghost-controls ghost-feed-editor">

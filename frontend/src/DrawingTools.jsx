@@ -2,6 +2,7 @@ import React, {useEffect,useRef,useState} from 'react';
 
 export const DRAWING_TOOLS=[
   {id:'trendline',label:'Trendline',icon:'\u2571',key:'T',group:'Lines'},
+  {id:'polyline',label:'Multi-point trendline',icon:'⌁',key:'P',group:'Lines'},
   {id:'horizontal',label:'Horizontal line',icon:'\u2501',key:'H',group:'Lines'},
   {id:'horizontal_ray',label:'Horizontal ray',icon:'\u2192',key:'J',group:'Lines'},
   {id:'vertical',label:'Vertical line',icon:'\u2503',key:'V',group:'Lines'},
@@ -12,7 +13,7 @@ export const DRAWING_TOOLS=[
   {id:'short',label:'Short R:R drawing',icon:'S',key:'S',group:'Paper trading'},
 ];
 const storageKey='crl-drawing-favorites';
-const initialFavorites=['horizontal','horizontal_ray','trendline','rectangle','fib','ghost_feed','long','short'];
+const initialFavorites=['horizontal','horizontal_ray','trendline','polyline','rectangle','fib','ghost_feed','long','short'];
 
 export default function DrawingTools({open,onOpen,mode,disabled,onSelect,onTrade}){
   const menu=useRef(null);

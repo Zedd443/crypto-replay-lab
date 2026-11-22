@@ -275,3 +275,48 @@ test('rewind audit prevents creating scored hypotheses from known future',async(
   if(await submit.count())await expect(submit).toBeDisabled();
   else await expect(page.getByLabel('Assessment drawing')).toHaveValue('');
 });
+
+test('horizontal line is pinned and selectable from chart',async({page})=>{
+  await page.getByRole('button',{name:'Shortcut Horizontal line'}).click();
+  const p=await at(page);
+  await page.mouse.click(p.x,p.y);
+  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
+  const items=(await (await page.request.get('/api/sessions/'+sid+'/drawings')).json());
+  expect(items.some(x=>x.kind==='horizontal')).toBe(true);
+  await expect(page.locator('.chart-shape-horizontal')).toHaveCount(1);
+  await page.getByRole('button',{name:/Drawings \(/}).click();
+  await expect(page.getByLabel('Show archived plans (0)')).toBeVisible();
+});
+test('multi-point trendline persists three anchors after Enter',async({page})=>{
+  await page.getByRole('button',{name:'Shortcut Multi-point trendline'}).click();
+  const p=await at(page);
+  await page.mouse.click(p.x,p.y);
+  await page.mouse.click(p.x+65,p.y+34);
+  await page.mouse.click(p.x+130,p.y-15);
+  await expect(page.getByText(/3 points/)).toBeVisible();
+  await page.keyboard.press('Enter');
+  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
+  await expect.poll(async()=>{
+    const items=(await (await page.request.get('/api/sessions/'+sid+'/drawings')).json());
+    return items.filter(x=>x.kind==='polyline').length;
+  }).toBe(1);
+  const items=(await (await page.request.get('/api/sessions/'+sid+'/drawings')).json());
+  const line=items.find(x=>x.kind==='polyline');
+  expect(line.points).toHaveLength(3);
+  await expect(page.locator('.chart-shape-polyline:not(.draft)')).toHaveCount(1);
+});
+test('trendline supports extending in both directions',async({page})=>{
+  await page.getByRole('button',{name:'Shortcut Trendline'}).click();
+  const p=await at(page);
+  await page.mouse.click(p.x,p.y);
+  await page.mouse.click(p.x+110,p.y-55);
+  await expect(page.locator('.chart-shape-trendline:not(.draft)')).toHaveCount(1);
+  const sid=await page.evaluate(()=>localStorage.getItem('crl-session'));
+  const select=page.getByLabel('Trendline extend mode');
+  await expect(select).toBeVisible();
+  await select.selectOption('both');
+  await expect.poll(async()=>{
+    const items=(await (await page.request.get('/api/sessions/'+sid+'/drawings')).json());
+    return items.find(x=>x.kind==='trendline')?.extend_mode;
+  }).toBe('both');
+});

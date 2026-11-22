@@ -83,6 +83,7 @@ def evaluate(locked,bars):
         response["reason"]="Rule-based anchor review at lock; no directional hypothesis or accuracy claim"
         return response
     if not observed:return response
+    response["reason"]="Evaluating completed candles; waiting for zone or entry trigger"
     up=mode in {"bounce_up","break_up"} or d["kind"]=="long_position"
     direction=1 if up else -1
     triggered=False
@@ -102,9 +103,12 @@ def evaluate(locked,bars):
             else:
                 fired=b["close"]>upper if direction==1 else b["close"]<lower
                 entry=b["close"]
-            if not fired:continue
+            if not fired:
+                response["reason"]=f"Zone/entry not triggered: checked {i+1}/{horizon} completed candles"
+                continue
             triggered=True;start_index=i
             response["trigger_bar"]=i+1
+            response["reason"]=f"Triggered on candle +{i+1}; waiting for next closed candle before evaluating target versus invalidation"
             # Same-bar ordering of touch vs threshold cannot be inferred from OHLC.
             # Only evaluate target/stop on subsequent completed bars.
             continue
@@ -126,7 +130,10 @@ def evaluate(locked,bars):
         response["status"]="TIMEOUT" if triggered else "NO_TRIGGER"
         response["reason"]="Neither level reached within evaluation horizon" if triggered else "Setup never triggered within evaluation horizon"
     elif triggered:
-        response["reason"]="Triggered; awaiting target, stop, or horizon"
+        response["reason"]=(
+            f"Triggered at candle +{start_index+1}; checked {len(observed)-start_index-1} subsequent bars. "
+            f"Target and invalidation not reached; {horizon-len(observed)} bars remain"
+        )
     return response
 
 def _structure_match(d,candles):

@@ -124,11 +124,11 @@ export default function AssessmentPanel({session,timeframe,drawings=[],selectedD
           </label>
           {!isPlan&&!isStructure&&<div className="assessment-targets">
             <label>Target %
-              <input aria-label="Assessment target percent" type="number" min=".01" max="50" step=".1"
+              <input aria-label="Assessment target percent" type="number" min=".01" max="50" step="any"
                 value={target} onChange={e=>setTarget(e.target.value)}/>
             </label>
             <label>Invalidation %
-              <input aria-label="Assessment invalidation percent" type="number" min=".01" max="50" step=".1"
+              <input aria-label="Assessment invalidation percent" type="number" min=".01" max="50" step="any"
                 value={stop} onChange={e=>setStop(e.target.value)}/>
             </label>
           </div>}

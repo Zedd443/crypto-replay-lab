@@ -15,7 +15,7 @@ import zipfile
 from flask import Flask, jsonify, request, g
 from .engine import MINUTE_MS, TF_MS, THREE_DAYS_MS, bucket_start, aggregate, synthetic_candles, validate_and_normalize
 
-from . import binance_source, brackets, orders, parquet_source
+from . import binance_source, brackets, orders, parquet_source, assessment
 
 DEFAULT_RAW = Path(__file__).resolve().parent.parent / "raw"
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "data" / "replay.sqlite3"
@@ -98,7 +98,7 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
           PRIMARY KEY(drawing_id,cursor)
         );
         """)
-        conn.executescript(orders.SCHEMA + brackets.SCHEMA)
+        conn.executescript(orders.SCHEMA + brackets.SCHEMA + assessment.SCHEMA)
         paper_columns={column["name"] for column in conn.execute("PRAGMA table_info(paper_positions)")}
         if "drawing_id" not in paper_columns:
             conn.execute("ALTER TABLE paper_positions ADD COLUMN drawing_id TEXT")
@@ -483,6 +483,7 @@ def create_app(database_path: str | Path | None = None, seed: bool = True,
             return jsonify({"error":"invalid drawing edit"}),400
         return jsonify({"id":drawing_id,"updated_at_cursor":state["cursor"]})
 
+    assessment.register(app, db, session_row, snapshot)
     orders.register(app, db, session_row)
     return app
 
